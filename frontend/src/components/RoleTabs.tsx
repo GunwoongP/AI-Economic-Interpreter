@@ -4,10 +4,19 @@ const LABEL:Record<Role,string>={ eco:'🟣 경제해석', firm:'🟠 기업분�
 export default function RoleTabs({ active, onChange }:{ active: Role|'all'; onChange:(r:Role|'all')=>void }){
 const items: (Role|'all')[] = ['all','eco','firm','house'];
 return (
-<nav className="flex gap-2 flex-wrap my-2">
-{items.map(it=> (
-<button key={it} onClick={()=>onChange(it)} className={`badge ${active===it? 'outline outline-2 outline-accent':''}`}>{it==='all'?'전체':LABEL[it as Role]}</button>
-))}
+<nav className="my-2 flex flex-wrap gap-2">
+{items.map(it=> {
+const isActive = active===it;
+return (
+<button
+  key={it}
+  onClick={()=>onChange(it)}
+  className={`badge transition ${isActive ? 'border-accent/60 bg-accent/25 text-text shadow-soft' : 'bg-chip/80 text-muted hover:text-text'}`}
+>
+  {it==='all'?'전체 보기':LABEL[it as Role]}
+</button>
+);
+})}
 </nav>
 );
 }

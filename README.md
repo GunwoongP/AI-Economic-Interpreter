@@ -113,6 +113,20 @@ cd frontend && npm i && cd ..
 
 ### 4️⃣ 실행 (개발모드)
 
+1. **시장 데이터 API (FastAPI)**
+
+```bash
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+# macOS/Linux
+source .venv/bin/activate
+pip install -r market_api/requirements.txt
+uvicorn market_api.app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+2. **AI Core, Backend, Frontend**
+
 ```bash
 # AI Core
 cd ai
@@ -146,8 +160,8 @@ curl http://localhost:3001/health
 curl -X POST http://localhost:3001/ask -H "Content-Type: application/json" \
   -d '{"q":"코스피가 뭐야","roles":["eco"],"mode":"parallel"}'
 
-# 시계열
-curl "http://localhost:3001/timeseries?symbol=KOSPI"
+# 시장 데이터 (FastAPI)
+curl "http://127.0.0.1:8000/series/KOSPI"
 ```
 
 ### 7️⃣ 프론트엔드 라우트

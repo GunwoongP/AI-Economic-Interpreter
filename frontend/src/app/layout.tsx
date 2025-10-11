@@ -1,4 +1,5 @@
 import '@/styles/globals.css';
+import AppProviders from '@/components/AppProviders';
 import Header from '@/components/Header';
 import type { ReactNode } from 'react';
 
@@ -10,8 +11,10 @@ export default function RootLayout({ children }:{ children: ReactNode }){
 return (
 <html lang="ko">
 <body>
+<AppProviders>
 <Header />
 <main className="max-w-[1080px] mx-auto px-5 pb-16">{children}</main>
+</AppProviders>
 </body>
 </html>
 );

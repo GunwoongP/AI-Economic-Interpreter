@@ -4,17 +4,64 @@
 
 
 :root{
---bg:#0b0c10; --panel:#121318; --muted:#8892a6; --text:#e6e9ef; --chip:#1d2030; --border:#2a2e3f; --accent:#6a5bff; --good:#22b573; --warn:#ffb84d; --bad:#ff7777;
+--bg-rgb:6 10 23;
+--panel-rgb:18 25 40;
+--muted-rgb:154 167 198;
+--text-rgb:245 247 255;
+--chip-rgb:34 41 63;
+--border-rgb:84 100 140;
+--accent-rgb:124 139 255;
+--good-rgb:61 212 161;
+--warn-rgb:255 197 98;
+--bad-rgb:255 125 142;
+
+--bg:rgb(var(--bg-rgb) / 1);
+--panel:rgb(var(--panel-rgb) / 0.82);
+--muted:rgb(var(--muted-rgb) / 1);
+--text:rgb(var(--text-rgb) / 1);
+--chip:rgb(var(--chip-rgb) / 0.75);
+--border:rgb(var(--border-rgb) / 0.25);
+--accent:rgb(var(--accent-rgb) / 1);
+--good:rgb(var(--good-rgb) / 1);
+--warn:rgb(var(--warn-rgb) / 1);
+--bad:rgb(var(--bad-rgb) / 1);
 }
 :root.light{
---bg:#f6f7fb; --panel:#ffffff; --muted:#5a6b83; --text:#111827; --chip:#eef2f8; --border:#e5e9f2; --accent:#4f46e5; --good:#16a34a; --warn:#d97706; --bad:#dc2626;
+--bg-rgb:244 246 255;
+--panel-rgb:255 255 255;
+--muted-rgb:90 104 133;
+--text-rgb:12 26 51;
+--chip-rgb:232 236 250;
+--border-rgb:120 146 220;
+--accent-rgb:91 108 255;
+--good-rgb:30 168 116;
+--warn-rgb:217 129 27;
+--bad-rgb:217 75 99;
+
+--bg:rgb(var(--bg-rgb) / 1);
+--panel:rgb(var(--panel-rgb) / 0.92);
+--muted:rgb(var(--muted-rgb) / 1);
+--text:rgb(var(--text-rgb) / 1);
+--chip:rgb(var(--chip-rgb) / 0.85);
+--border:rgb(var(--border-rgb) / 0.25);
+--accent:rgb(var(--accent-rgb) / 1);
+--good:rgb(var(--good-rgb) / 1);
+--warn:rgb(var(--warn-rgb) / 1);
+--bad:rgb(var(--bad-rgb) / 1);
 }
 html,body{height:100%}
-body{background:var(--bg); color:var(--text)}
+body{
+background:var(--bg);
+color:var(--text);
+font-family:'Pretendard Variable','Inter','Spoqa Han Sans Neo','Segoe UI',system-ui,sans-serif;
+line-height:1.65;
+letter-spacing:-0.005em;
+-webkit-font-smoothing:antialiased;
+}
 
 
 /* utility */
-.badge{ @apply inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs border-border bg-chip; }
+.badge{ @apply inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-xs font-medium border-border/60 bg-chip text-muted transition-colors; }
+.badge:hover{ @apply text-text border-accent/60; }
 .kbd{@apply font-mono rounded-md border border-border px-1.5 py-0.5 bg-chip text-xs}
 .hr{height:1px;background:linear-gradient(90deg,transparent,#ffffff12,transparent)}
-
