@@ -1,27 +1,90 @@
 // src/lib/api.ts
+import type { AskInput, AskOutput, Mode, Role, SeriesResp } from './types';
+
 const BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, ''); // ← 끝 슬래시 제거
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' as const };
 
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { 'Content-Type':'application/json', ...(init?.headers||{}) },
+    headers: { ...JSON_HEADERS, ...(init?.headers || {}) },
   });
   if (!res.ok) {
-    const txt = await res.text().catch(()=> '');
+    const txt = await res.text().catch(() => '');
     throw new Error(`HTTP ${res.status} ${url} :: ${txt}`);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
-export async function postAsk(body: any){
-  const url = BASE ? `${BASE}/ask` : '/api/ask';   // ← BASE 있으면 백엔드, 없으면 mock
-  // 디버깅 로그
-  if (typeof window !== 'undefined') console.log('[postAsk] url=', url, 'BASE=', BASE, 'body=', body);
-  return jfetch(url, { method:'POST', body: JSON.stringify(body) });
+function apiUrl(path: string) {
+  return BASE ? `${BASE}${path}` : `/api${path}`;
 }
 
-export async function getSeries(symbol: 'KOSPI'|'IXIC'){
-  const url = BASE ? `${BASE}/timeseries?symbol=${symbol}` : `/api/timeseries?symbol=${symbol}`;
-  if (typeof window !== 'undefined') console.log('[getSeries] url=', url, 'BASE=', BASE);
-  return jfetch(url);
+export function postAsk(body: AskInput): Promise<AskOutput> {
+  const url = apiUrl('/ask');
+  return jfetch<AskOutput>(url, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function getSeries(symbol: SeriesResp['symbol']) {
+  const url = apiUrl(`/timeseries?symbol=${symbol}`);
+  return jfetch<SeriesResp>(url);
+}
+
+export type AskStreamEvent =
+  | { type: 'start'; data: { ts: number } }
+  | { type: 'line'; data: { role: Role; title: string; text: string } }
+  | { type: 'metrics'; data: NonNullable<AskOutput['metrics']> }
+  | { type: 'complete'; data: AskOutput };
+
+export interface StreamAskParams extends AskInput {
+  signal?: AbortSignal;
+  onEvent?: (evt: AskStreamEvent) => void;
+}
+
+export async function streamAsk({ signal, onEvent, ...body }: StreamAskParams): Promise<AskOutput> {
+  const url = apiUrl('/ask/stream');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status} ${url} :: ${txt}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalPayload: AskOutput | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nlIndex = buffer.indexOf('\n');
+    while (nlIndex >= 0) {
+      const raw = buffer.slice(0, nlIndex).trim();
+      buffer = buffer.slice(nlIndex + 1);
+      if (raw) {
+        try {
+          const evt = JSON.parse(raw) as AskStreamEvent;
+          onEvent?.(evt);
+          if (evt.type === 'complete') {
+            finalPayload = evt.data;
+          }
+        } catch (err) {
+          console.error('Failed to parse stream chunk', err, raw);
+        }
+      }
+      nlIndex = buffer.indexOf('\n');
+    }
+  }
+
+  if (!finalPayload) {
+    throw new Error('Stream ended without completion payload');
+  }
+  return finalPayload;
 }

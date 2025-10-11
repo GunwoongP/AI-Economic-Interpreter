@@ -13,5 +13,5 @@ cards: Card[];
 metrics?: { ttft_ms?: number; tps?: number; tokens?: number; conf?: number };
 meta?: { mode: Mode; roles: Role[]; stamp?: string[] };
 }
-export interface SeriesPoint { t: number; close: number }
+export interface SeriesPoint { t: number; close: number; volume?: number | null }
 export interface SeriesResp { symbol: 'KOSPI'|'IXIC'; stamp: string; values: SeriesPoint[] }

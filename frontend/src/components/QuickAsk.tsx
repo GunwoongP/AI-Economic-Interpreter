@@ -1,73 +1,76 @@
 'use client';
-import { useState, useMemo } from 'react';
-import { postAsk } from '@/lib/api';
-import type { AskOutput, Mode, Role } from '@/lib/types';
+import { useMemo, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import MetricChips from '@/components/MetricChips';
+import { useAskStream } from '@/hooks/useAskStream';
+import type { Mode, Role } from '@/lib/types';
 import Card from './Card';
 
 export default function QuickAsk(){
-  const [q, setQ] = useState('');
-  const [data, setData] = useState<AskOutput|null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string>('');
+const [q, setQ] = useState('');
+const askStream = useAskStream();
+const metrics = askStream.metrics || askStream.data?.metrics || null;
+const top3 = useMemo(()=> (askStream.data?.cards || []).slice(0,3), [askStream.data]);
 
-  async function run(mode: Mode = 'auto', prefer: Role[] = []){
-    if(!q.trim()) return;
-    setLoading(true); setErr(''); setData(null);
-    try{
-      const r = await postAsk({ q, mode, prefer });
-      setData(r);
-      setQ(''); // ✅ 질문 후 입력창 비우기
-    }catch(e:any){
-      setErr(e?.message || '요청 실패');
-    }finally{
-      setLoading(false);
-    }
-  }
+async function run(modeArg: Mode = 'auto', prefer: Role[] = []){
+const trimmed = q.trim();
+if(!trimmed) return;
+try{
+await askStream.ask({ q: trimmed, mode: modeArg, prefer });
+setQ('');
+}catch{
+// handled inside hook
+}
+}
 
-  // ✅ Enter키 처리
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>){
-    if(e.key === 'Enter' && !e.shiftKey){
-      e.preventDefault();
-      run();
-    }
-  }
+function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>){
+if(e.key==='Enter' && !e.shiftKey){
+e.preventDefault();
+run();
+}
+}
 
-  const top3 = useMemo(()=> (data?.cards || []).slice(0,3), [data]);
-
-  return (
-    <section className="bg-panel border border-border rounded-2xl p-4 shadow-soft space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">빠른 질문</h3>
-        <div className="flex gap-2">
-          <button onClick={()=>run('auto')} className="badge bg-accent/30 border-accent">
-            질문 (Auto)
-          </button>
-          <a href="/ask" className="badge">자세히 보기</a>
-        </div>
-      </div>
-
-      <textarea
-        className="w-full min-h-[72px] bg-chip border border-border rounded-xl px-3 py-2 text-sm"
-        value={q}
-        onChange={e=>setQ(e.target.value)}
-        onKeyDown={handleKeyDown} // ✅ 엔터키 처리
-        placeholder="질문을 입력하고 Enter를 눌러보세요 (Shift+Enter로 줄바꿈)"
-      />
-
-      {loading && <div className="text-xs text-muted">생성 중…</div>}
-      {err && <div className="text-xs text-bad">{err}</div>}
-
-      {top3.length>0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {top3.map((c,i)=> <Card key={i} c={c} />)}
-        </div>
-      )}
-
-      {!loading && !err && top3.length===0 && (
-        <div className="text-xs text-muted">
-          힌트: “환율이 오를 때 수출주는?”, “삼성 24Q4 실적 의미는?”
-        </div>
-      )}
-    </section>
-  );
+return (
+<section className="space-y-3 rounded-2xl border border-border bg-panel p-4 shadow-soft">
+<div className="flex items-center justify-between gap-3">
+<h3 className="text-sm font-semibold">빠른 질문</h3>
+<div className="flex gap-2">
+<MetricChips data={metrics} />
+<button onClick={()=>run('auto')} className="badge border-accent bg-accent/30">질문 (Auto)</button>
+</div>
+</div>
+<textarea
+className="min-h-[72px] w-full rounded-xl border border-border bg-chip px-3 py-2 text-sm"
+value={q}
+onChange={e=>setQ(e.target.value)}
+onKeyDown={handleKeyDown}
+placeholder="질문을 입력하고 Enter를 눌러보세요 (Shift+Enter로 줄바꿈)"
+/>
+{askStream.isLoading && <div className="text-xs text-muted">생성 중…</div>}
+{askStream.error && <div className="text-xs text-bad">{askStream.error}</div>}
+{askStream.lines.length>0 && (
+<div className="space-y-2 rounded-xl border border-border bg-chip/70 p-3 text-sm">
+<div className="text-xs text-muted">실시간 응답</div>
+{Object.entries(askStream.grouped).map(([title, lines])=>(
+<div key={title}>
+<div className="font-semibold">{title}</div>
+<ul className="ml-4 list-disc space-y-1">
+{lines.map(line=> <li key={line.id}>{line.text}</li>)}
+</ul>
+</div>
+))}
+</div>
+)}
+{top3.length>0 && (
+<div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+{top3.map((c,i)=> <Card key={`${c.title}-${i}`} c={c} />)}
+</div>
+)}
+{!askStream.isLoading && !askStream.error && top3.length===0 && (
+<div className="text-xs text-muted">
+힌트: “환율이 오를 때 수출주는?”, “삼성 24Q4 실적 의미는?”
+</div>
+)}
+</section>
+);
 }
