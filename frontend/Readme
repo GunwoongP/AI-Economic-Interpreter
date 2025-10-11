@@ -1,0 +1,27 @@
+# AI 경제해석관 — Frontend (Next.js/TS)
+
+
+## Quick Start
+```bash
+npm i
+npm run dev
+# open http://localhost:3000
+```
+
+
+- `/` 대시보드: 오늘의 상식 + KOSPI/NASDAQ 스파크라인 + 한 줄 해석
+- `/ask` 질문: 모드 선택, 역할 탭, 카드 3장, 메트릭/면책
+
+
+## Backend 스위치(추후)
+- 환경변수 `NEXT_PUBLIC_API_BASE`를 실서버(예: `http://localhost:3001`)로 지정하면
+`src/lib/api.ts`가 자동으로 해당 서버를 사용합니다. 현재는 `/app/api/*`로 모킹됩니다.
+
+
+## 구조
+- 타입: `src/lib/types.ts`
+- API 래퍼: `src/lib/api.ts`
+- 테마: `src/lib/theme.ts`
+- 컴포넌트: `src/components/*`
+- 페이지: `src/app/page.tsx`, `src/app/ask/page.tsx`
+- Mock API: `src/app/api/ask/route.ts`, `src/app/api/timeseries/route.ts`

@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ko" data-theme="system">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AI 경제해석관 — 대시보드 v3 (Front-only)</title>
+<style>
+  /* ===== THEME TOKENS ===== */
+  :root{
+    --bg:#0b0c10; --panel:#121318; --muted:#8892a6; --text:#e6e9ef; --soft:#1a1b23;
+    --purple:#7650ff; --orange:#ff8a3d; --green:#22b573; --blue:#4aa3ff; --red:#ff5d5d;
+    --card:#141622; --chip:#1d2030; --border:#2a2e3f; --shadow:0 10px 24px rgba(0,0,0,.35);
+    --accent:#6a5bff; --good:#22b573; --warn:#ffb84d; --bad:#ff7777;
+  }
+  :root.light{
+    --bg:#f6f7fb; --panel:#ffffff; --muted:#5a6b83; --text:#111827; --soft:#f1f4fa;
+    --card:#ffffff; --chip:#eef2f8; --border:#e5e9f2; --shadow:0 8px 18px rgba(0,0,0,.08);
+    --accent:#4f46e5; --good:#16a34a; --warn:#d97706; --bad:#dc2626;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg); color:var(--text);
+       font: 15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR",Helvetica,Arial}
+  a{color:var(--blue); text-decoration:none}
+  .wrap{max-width:1080px;margin:40px auto;padding:0 20px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+  .logo{width:38px;height:38px;border-radius:12px;background:
+        radial-gradient(60% 60% at 30% 30%, #fff4, transparent),
+        conic-gradient(from 210deg at 50% 50%, var(--purple), var(--blue), var(--green), var(--orange), var(--purple));
+        box-shadow:0 6px 20px #0006}
+  h1{font-size:22px;margin:0}
+  .tagline{color:var(--muted);font-size:13px}
+  .themeToggle{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .themeSelect{background:var(--chip);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+  .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+  @media (max-width:980px){.grid{grid-template-columns:1fr}}
+
+  /* Tip Banner */
+  .tip{display:flex;align-items:flex-start;gap:10px;background:linear-gradient(90deg,rgba(106,91,255,.16),transparent);
+       border:1px dashed var(--accent); padding:10px 12px;border-radius:12px}
+  .tip .dot{width:10px;height:10px;background:var(--accent);border-radius:50%;margin-top:4px}
+  .tip strong{font-weight:600}
+  .small{font-size:12px;color:var(--muted)}
+  .hid{display:none}
+  .hr{height:1px;background:linear-gradient(90deg,transparent,#ffffff12,transparent);margin:10px 0}
+  :root.light .hr{background:linear-gradient(90deg,transparent,#00000012,transparent)}
+
+  /* Tabs */
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px}
+  .tab{padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--chip);cursor:pointer;font-size:13px}
+  .tab.active{outline:2px solid var(--accent)}
+
+  /* Search Row */
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input[type=text]{flex:1;background:var(--soft);border:1px solid var(--border);color:var(--text);
+    border-radius:12px;padding:12px 14px;outline:none}
+  .btn{background:#1e2333;border:1px solid var(--border);color:#fff;border-radius:12px;padding:10px 12px;cursor:pointer}
+  .btn:hover{filter:brightness(1.1)}
+  :root.light .btn{background:#f5f7ff;color:#222;border-color:#dbe1ee}
+  .btn.primary{background:linear-gradient(135deg,#3a34ff,#6a5bff)}
+  :root.light .btn.primary{background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff}
+
+  /* Cards */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  @media (max-width:980px){.cards{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+  .card h3{margin:0 0 8px 0; font-size:15px; display:flex; align-items:center; gap:8px}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:var(--chip)}
+  .badge .dot{width:8px;height:8px;border-radius:50%}
+  .b-eco .dot{background:var(--purple)}
+  .b-firm .dot{background:var(--orange)}
+  .b-house .dot{background:var(--blue)}
+  .b-combined .dot{background:var(--green)}
+  .source{font-size:12px;color:var(--muted)}
+  .metric{background:var(--chip);border:1px solid var(--border);padding:8px 10px;border-radius:10px;font-size:12px;margin-right:8px}
+
+  /* Charts */
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:980px){.charts{grid-template-columns:1fr}}
+  .chartCard{padding:10px}
+  canvas{width:100%;height:120px;background:var(--soft);border-radius:12px;border:1px solid var(--border)}
+  .chartHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .badgeMini{font-size:11px;border:1px solid var(--border);background:var(--chip);padding:4px 8px;border-radius:999px}
+  .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
+  .conf{font-size:11px}
+  .foot{margin-top:16px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo" aria-hidden="true"></div>
+    <div>
+      <h1>AI 경제해석관 — 대시보드 v3</h1>
+      <div class="tagline">“오늘의 상식 + 지수 스파크라인 + 역할별 해석 카드”</div>
+    </div>
+    <div class="themeToggle">
+      <label for="themeSel" class="small">테마</label>
+      <select id="themeSel" class="themeSelect" title="테마 변경">
+        <option value="system">시스템</option>
+        <option value="dark">다크</option>
+        <option value="light">라이트</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- 오늘의 경제 상식 -->
+  <div id="tipBox" class="panel tip hid">
+    <div class="dot"></div>
+    <div>
+      <div class="small"><strong>오늘의 경제 상식</strong> · <span id="tipDate" class="small"></span></div>
+      <div id="tipText" class="small"></div>
+    </div>
+  </div>
+
+  <div class="divider" style="height:12px"></div>
+
+  <!-- 지수 차트 -->
+  <section class="panel">
+    <div class="charts">
+      <div class="card chartCard">
+        <div class="chartHeader">
+          <div><strong>KOSPI (3M)</strong> <span id="kospiDelta" class="delta small"></span></div>
+          <div><span id="kospiStamp" class="badgeMini">데이터: -</span></div>
+        </div>
+        <canvas id="chartKOSPI" width="480" height="120"></canvas>
+      </div>
+      <div class="card chartCard">
+        <div class="chartHeader">
+          <div><strong>NASDAQ (3M)</strong> <span id="ixicDelta" class="delta small"></span></div>
+          <div><span id="ixicStamp" class="badgeMini">데이터: -</span></div>
+        </div>
+        <canvas id="chartIXIC" width="480" height="120"></canvas>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div id="indexExplain" class="small">지수 해석: 최신 뉴스·정책·자금흐름을 근거로 ‘최근 변동 이유’와 ‘의미’를 한 줄로 요약합니다.</div>
+  </section>
+
+  <div class="divider" style="height:12px"></div>
+
+  <!-- 역할 탭 -->
+  <nav class="tabs" role="tablist" aria-label="역할별 해석">
+    <button class="tab active" data-tab="all">전체</button>
+    <button class="tab" data-tab="eco">🟣 경제해석(역사·정치)</button>
+    <button class="tab" data-tab="firm">🟠 기업분석(재무/소개/평가)</button>
+    <button class="tab" data-tab="house">🔵 가계조언(원칙/모형)</button>
+  </nav>
+
+  <!-- 질의 -->
+  <section class="panel">
+    <div class="row">
+      <input id="q" type="text" placeholder="예) 최근 코스피 하락 원인이 뭐야? / 삼성전자 재무 요약 / 가계 포트폴리오 원칙 알려줘" />
+      <button id="askBtn" class="btn primary">질문</button>
+      <button id="mockBtn" class="btn" title="백엔드 없이 시연">모의응답</button>
+    </div>
+
+    <div class="hr"></div>
+    <div id="metrics" class="row small"></div>
+    <div id="status" class="small"></div>
+
+    <div id="cards" class="cards"></div>
+
+    <div class="foot">
+      <div>⚠️ 교육 목적의 해석입니다. 투자 권유가 아니며, 의사결정의 책임은 이용자에게 있습니다.</div>
+      <div id="lastRun" class="small"></div>
+    </div>
+  </section>
+
+  <!-- 도움말 -->
+  <section class="panel">
+    <div class="small">
+      <strong>백엔드 인터페이스(권장)</strong><br/>
+      • <code>POST /ask</code> → <code>{"q": "..."} </code> 반환: <code>{"cards":[{type:"eco|firm|house|combined", title, content, sources[], points[] }...], "metrics":{ttft_ms,tps,tokens,conf}}</code><br/>
+      • <code>GET /timeseries?symbol=KOSPI|IXIC&range=3M</code> → <code>{symbol,stamp,values:[{t,close},...]}</code>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ================= THEME ================= */
+const themeSel = document.getElementById('themeSel');
+function applyTheme(mode){
+  const root = document.documentElement;
+  root.dataset.theme = mode;
+  if(mode==='light'){ root.classList.add('light'); }
+  else if(mode==='dark'){ root.classList.remove('light'); }
+  else{
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    root.classList.toggle('light', prefersLight);
+  }
+  localStorage.setItem('econ.theme', mode);
+}
+themeSel.addEventListener('change', ()=> applyTheme(themeSel.value));
+(function initTheme(){
+  const saved = localStorage.getItem('econ.theme') || 'system';
+  themeSel.value = saved; applyTheme(saved);
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()=>{
+    if((localStorage.getItem('econ.theme')||'system')==='system') applyTheme('system');
+  });
+})();
+
+/* ================= DOM ================= */
+const API_ASK = "http://localhost:3001/ask";
+const API_TS  = "http://localhost:3001/timeseries";
+
+const tipBox = document.getElementById('tipBox');
+const tipText= document.getElementById('tipText');
+const tipDate= document.getElementById('tipDate');
+
+const qEl    = document.getElementById('q');
+const askBtn = document.getElementById('askBtn');
+const mockBtn= document.getElementById('mockBtn');
+const cardsEl= document.getElementById('cards');
+const metricsEl = document.getElementById('metrics');
+const statusEl  = document.getElementById('status');
+const lastRunEl = document.getElementById('lastRun');
+
+const tabs = Array.from(document.querySelectorAll('.tab'));
+function setActiveTab(name){
+  tabs.forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  localStorage.setItem('econ.tab', name);
+  renderCards(window.__lastCards||[], name);
+  if(name==='all') history.replaceState(null,'','#/');
+  else history.replaceState(null,'','#/'+name);
+}
+tabs.forEach(t=> t.addEventListener('click', ()=> setActiveTab(t.dataset.tab)));
+(function initTab(){
+  const saved = localStorage.getItem('econ.tab') || 'all';
+  const hash = location.hash.replace(/^#\/?/, '') || saved;
+  setActiveTab(['all','eco','firm','house'].includes(hash)?hash:'all');
+})();
+
+/* ================= UTILS ================= */
+function esc(x){return (x??'').toString().replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]))}
+function shorten(s,n){s=s||'';return s.length>n?s.slice(0,n-1)+'…':s}
+function metricChip(k,v){
+  const d=document.createElement('div'); d.className='metric';
+  d.innerHTML=`<strong>${esc(k)}</strong> ${esc(v)}`; return d;
+}
+
+/* ================= RENDER: CARDS ================= */
+function badge(type){
+  const map = {
+    eco:{label:'경제해석', cls:'b-eco'},
+    firm:{label:'기업분석', cls:'b-firm'},
+    house:{label:'가계조언', cls:'b-house'},
+    combined:{label:'통합해석', cls:'b-combined'}
+  };
+  const info=map[type]||map.combined;
+  return `<span class="badge ${info.cls}"><span class="dot"></span>${info.label}</span>`;
+}
+function renderCards(cards, tab='all'){
+  cardsEl.innerHTML='';
+  cards.filter(c=> tab==='all' ? true : (c.type===tab)).slice(0,3).forEach(c=>{
+    const div = document.createElement('div');
+    div.className='card';
+    div.innerHTML = `
+      <h3>${badge(c.type)} ${c.title?esc(c.title):''}</h3>
+      ${c.content?`<p>${esc(c.content)}</p>`:''}
+      ${Array.isArray(c.points)? `<ul>${c.points.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}
+      ${Array.isArray(c.sources)&&c.sources.length? `<div class="hr"></div><div class="source">근거: ${c.sources.map(s=> s.url? `<a href="${encodeURI(s.url)}" target="_blank" rel="noreferrer">${esc(s.title||s.url)}</a>` : esc(s)).join(' · ')}</div>`:''}
+    `;
+    cardsEl.appendChild(div);
+  });
+}
+function renderMetrics(m){
+  metricsEl.innerHTML='';
+  if(!m) return;
+  if(m.ttft_ms!=null) metricsEl.appendChild(metricChip('TTFT',m.ttft_ms+'ms'));
+  if(m.tps!=null)     metricsEl.appendChild(metricChip('TPS',m.tps));
+  if(m.tokens!=null)  metricsEl.appendChild(metricChip('Tokens',m.tokens));
+  if(m.conf!=null)    metricsEl.appendChild(metricChip('Conf',m.conf));
+}
+
+/* ================= ASK ================= */
+async function ask(query){
+  statusEl.textContent='질의 전송 중…'; renderCards([]); renderMetrics(null);
+  const t0=performance.now();
+  let data=null;
+  try{
+    const r=await fetch(API_ASK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:query})});
+    if(!r.ok) throw new Error('status '+r.status);
+    data=await r.json();
+  }catch(e){
+    statusEl.textContent='서버 응답 실패, 모의응답으로 대체'; data = mockAsk(query);
+  }
+  const t1=performance.now();
+  if(!data.metrics) data.metrics={};
+  if(data.metrics.ttft_ms==null) data.metrics.ttft_ms=Math.round(t1-t0);
+  if(data.metrics.tokens==null) data.metrics.tokens = (JSON.stringify(data.cards||[]).length/4|0);
+  if(data.metrics.tps==null){
+    const sec = Math.max((data.metrics.duration_ms||data.metrics.ttft_ms)/1000, 0.001);
+    data.metrics.tps = (data.metrics.tokens/sec).toFixed(1);
+  }
+  window.__lastCards = data.cards||[];
+  renderCards(window.__lastCards, (document.querySelector('.tab.active')||{}).dataset?.tab || 'all');
+  renderMetrics(data.metrics);
+  statusEl.textContent='완료';
+  lastRunEl.textContent = new Date().toLocaleString() + ' 실행';
+}
+
+/* ================= INITIAL TIP ================= */
+async function loadTip(){
+  tipDate.textContent = new Date().toLocaleDateString();
+  try{
+    const r=await fetch(API_ASK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:"오늘의 경제 상식 한 줄"})});
+    if(!r.ok) throw 0;
+    const data=await r.json();
+    const tip = extractTip(data);
+    showTip(tip || "명목금리와 실질금리는 다릅니다. 실질금리 ≈ 명목금리 − 기대인플레이션.");
+  }catch{
+    showTip("분산투자는 ‘수익 극대화’가 아니라 ‘큰 손실을 피하는’ 리스크 관리 원칙입니다.");
+  }
+}
+function extractTip(resp){
+  const cards = Array.isArray(resp?.cards)?resp.cards:[];
+  if(cards.length===0) return null;
+  const c0=cards[0];
+  if(Array.isArray(c0.points)&&c0.points[0]) return c0.points[0];
+  if(typeof c0.content==='string') return c0.content.split(/\r?\n/)[0];
+  return null;
+}
+function showTip(t){ tipText.textContent=t; tipBox.classList.remove('hid'); }
+
+/* ================= TIMESERIES + CHARTS ================= */
+const kospiCanvas = document.getElementById('chartKOSPI');
+const ixicCanvas  = document.getElementById('chartIXIC');
+const kospiStamp  = document.getElementById('kospiStamp');
+const ixicStamp   = document.getElementById('ixicStamp');
+const kospiDelta  = document.getElementById('kospiDelta');
+const ixicDelta   = document.getElementById('ixicDelta');
+
+async function loadSeries(symbol){
+  const url = `${API_TS}?symbol=${encodeURIComponent(symbol)}&range=3M`;
+  try{
+    const r=await fetch(url);
+    if(!r.ok) throw 0;
+    return await r.json();
+  }catch{
+    return mockSeries(symbol);
+  }
+}
+function drawSpark(canvas, values){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if(!values||values.length<2){ return; }
+  const ys = values.map(v=>v.close);
+  const min=Math.min(...ys), max=Math.max(...ys);
+  const pad=8;
+  const scaleX=(i)=> pad + (W-2*pad)*(i/(values.length-1));
+  const scaleY=(y)=> H - pad - (H-2*pad)*((y-min)/Math.max(1e-9, (max-min)));
+  // grid
+  ctx.globalAlpha=.15; ctx.strokeStyle='#888'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad, scaleY(min)); ctx.lineTo(W-pad, scaleY(min)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad, scaleY(max)); ctx.lineTo(W-pad, scaleY(max)); ctx.stroke();
+  ctx.globalAlpha=1;
+  // line
+  ctx.strokeStyle = getComputedStyle(document.documentElement).classList.contains('light') ? '#111' : '#e6e9ef';
+  ctx.lineWidth=2; ctx.beginPath();
+  ctx.moveTo(scaleX(0), scaleY(ys[0]));
+  for(let i=1;i<ys.length;i++){ ctx.lineTo(scaleX(i), scaleY(ys[i])); }
+  ctx.stroke();
+}
+function pctChange(values){
+  if(!values||values.length<2) return 0;
+  const a=values[0].close, b=values[values.length-1].close;
+  return ((b-a)/a)*100;
+}
+function stamp(el, stampText){ el.textContent = '데이터: ' + (stampText||'-'); }
+function delta(el, v){
+  const p = (v||0).toFixed(2) + '%';
+  el.textContent = (v>=0? ' ▲ ' : ' ▼ ') + p;
+  el.classList.toggle('up', v>=0);
+  el.classList.toggle('down', v<0);
+}
+
+/* ================= MOCKS ================= */
+function mockAsk(q){
+  return {
+    cards:[
+      {type:'eco', title:'최근 코스피/나스닥 변동의 거시적 배경',
+       content:'달러 강세와 장단기금리차 축소가 동반. 과거 2010–2013과 유사하나, 현재는 재정 확장과 반도체 업황 회복 기대가 상존.',
+       points:['정책 일정(금통위/FOMC) 확인','DXY·유가·구리가격 동시 관찰','섹터별 수급 분화'],
+       sources:[{title:'거시 브리핑(요약)', url:'https://example.org/macro'}]},
+      {type:'firm', title:'삼성전자 재무 요약', content:'PER 14, ROE 8%, 부채비율 20% (최근 4개 분기 평균).', sources:['finance.db/company']},
+      {type:'house', title:'가계 포트폴리오 원칙', content:'비상금 3–6개월, 고금리 부채 우선상환 후 위험자산은 점진 배분. 장기 분산이 손실확률을 낮춤.'}
+    ],
+    metrics:{ttft_ms:120,tps:40.1,tokens:88,conf:0.72}
+  };
+}
+function mockSeries(symbol){
+  // 단순한 3M 스파크라인용 가짜 시계열
+  const N=90, base = symbol==='KOSPI'?2500:15000, vol = symbol==='KOSPI'?12:60;
+  const arr=[]; let v=base;
+  for(let i=0;i<N;i++){ v += (Math.random()-0.5)*vol; arr.push({t: Date.now()-(N-i)*86400000, close: Math.max(1, v)}); }
+  return {symbol, stamp: new Date().toISOString().slice(0,16).replace('T',' '), values: arr};
+}
+
+/* ================= INDEX EXPLANATION (from /ask) ================= */
+async function loadIndexExplanation(){
+  try{
+    const r=await fetch(API_ASK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:"지수 변동 이유 한 줄 요약"})});
+    if(!r.ok) throw 0;
+    const data=await r.json();
+    const c0=(data.cards||[])[0];
+    if(c0 && c0.content) document.getElementById('indexExplain').textContent = '지수 해석: ' + c0.content.split(/\r?\n/)[0];
+  }catch{
+    // keep default
+  }
+}
+
+/* ================= BOOT ================= */
+(async function boot(){
+  // Tip
+  loadTip();
+
+  // Series
+  const kospi = await loadSeries('KOSPI');
+  const ixic  = await loadSeries('IXIC');
+  drawSpark(kospiCanvas, kospi.values); drawSpark(ixicCanvas, ixic.values);
+  stamp(kospiStamp, kospi.stamp); stamp(ixicStamp, ixic.stamp);
+  delta(kospiDelta, pctChange(kospi.values)); delta(ixicDelta, pctChange(ixic.values));
+
+  // One-line index explanation
+  loadIndexExplanation();
+})();
+
+/* ================= EVENTS ================= */
+askBtn.addEventListener('click', ()=>{
+  const v=qEl.value.trim(); if(!v){qEl.focus();return;} ask(v);
+});
+qEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ askBtn.click(); } });
+
+mockBtn.addEventListener('click', ()=>{
+  const data=mockAsk(qEl.value||'데모 질의');
+  window.__lastCards=data.cards; renderCards(window.__lastCards,(document.querySelector('.tab.active')||{}).dataset?.tab||'all'); renderMetrics(data.metrics);
+  statusEl.textContent='모의응답 표시'; lastRunEl.textContent=new Date().toLocaleString()+' 실행';
+});
+</script>
+</body>
+</html>

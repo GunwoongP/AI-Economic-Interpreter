@@ -1,0 +1,42 @@
+# ======================================
+# AI Economic Interpreter (root)
+# Python dependencies for AI Core & RAG
+# ======================================
+
+# ---------- Core AI Model ----------
+torch>=2.2.0
+transformers>=4.40.0
+accelerate>=0.28.0
+sentencepiece>=0.1.99
+safetensors>=0.4.3
+protobuf>=4.25.0
+
+# ---------- Server ----------
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.4
+requests>=2.31.0
+
+# ---------- Retrieval / RAG ----------
+faiss-cpu>=1.8.0
+numpy>=1.26.4
+scikit-learn>=1.5.0
+rank-bm25>=0.2.2
+tqdm>=4.66.2
+python-dotenv>=1.0.1
+
+# ---------- Logging / Utility ----------
+loguru>=0.7.2
+rich>=13.7.0
+colorama>=0.4.6
+
+# ---------- Optional: News / Docs ----------
+beautifulsoup4>=4.12.3
+lxml>=5.2.1
+newspaper3k>=0.2.8
+langchain>=0.2.5
+chromadb>=0.5.3
+
+# ---------- Dev / Notebook ----------
+ipykernel>=6.29.0
+pytest>=8.2.0
