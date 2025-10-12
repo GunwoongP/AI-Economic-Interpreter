@@ -10,7 +10,6 @@ const LABEL: Record<string, string> = {
 ttft_ms: 'TTFT',
 tps: 'TPS',
 tokens: 'Tokens',
-conf: 'Conf',
 };
 
 export default function MetricChips({ data, className }: Props){
@@ -22,8 +21,6 @@ key,
 label: LABEL[key],
 value: key==='ttft_ms'
 ? `${Math.round(Number(value))}ms`
-: key==='conf'
-? Number(value).toFixed(2)
 : Number.isFinite(Number(value))
 ? Number(value).toFixed(key==='tps'?1:0)
 : String(value),

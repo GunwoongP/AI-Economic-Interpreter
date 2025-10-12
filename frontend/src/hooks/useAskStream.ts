@@ -23,6 +23,7 @@ export interface UseAskStreamResult {
   isLoading: boolean;
   error: string | null;
   reset: () => void;
+  hydrate: (data: AskOutput) => void;
 }
 
 export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStreamResult {
@@ -30,6 +31,7 @@ export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStre
   const [metrics, setMetrics] = useState<NonNullable<AskOutput['metrics']> | null>(null);
   const [meta, setMeta] = useState<AskOutput['meta'] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<AskOutput | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStre
       setMetrics(null);
       setMeta(null);
       setError(null);
+      setSnapshot(undefined);
 
       const result = await streamAsk({
         ...input,
@@ -75,6 +78,9 @@ export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStre
       return result;
     },
     onSuccess: (data) => {
+      setSnapshot(data);
+      setMetrics((prev) => prev ?? data.metrics ?? null);
+      setMeta((prev) => prev ?? data.meta ?? null);
       onComplete?.(data);
     },
     onError: (err: unknown) => {
@@ -104,7 +110,16 @@ export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStre
     setMetrics(null);
     setMeta(null);
     setError(null);
+    setSnapshot(undefined);
     mutation.reset();
+  };
+  const hydrate = (data: AskOutput) => {
+    abortRef.current?.abort();
+    setLines([]);
+    setError(null);
+    setMetrics(data.metrics ?? null);
+    setMeta(data.meta ?? null);
+    setSnapshot(data);
   };
 
   return {
@@ -114,9 +129,10 @@ export function useAskStream(onComplete?: (data: AskOutput) => void): UseAskStre
     grouped,
     metrics,
     meta,
-    data: mutation.data,
+    data: snapshot,
     isLoading: mutation.isPending,
     error,
     reset,
+    hydrate,
   };
 }

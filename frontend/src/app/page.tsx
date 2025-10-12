@@ -6,13 +6,43 @@ import DailyTerm from '@/components/DailyTerm';
 import SparkChart from '@/components/SparkChart';
 import Card from '@/components/Card';
 import ModeSelector from '@/components/ModeSelector';
-import RoleTabs from '@/components/RoleTabs';
-import MetricChips from '@/components/MetricChips';
 import HistoryPanel from '@/components/HistoryPanel';
 import { useAskStream } from '@/hooks/useAskStream';
 import { getSeries } from '@/lib/api';
 import type { Mode, Role, SeriesResp } from '@/lib/types';
-import { loadHistory, saveHistoryItem, uuid } from '@/lib/history';
+import {
+  loadHistory,
+  saveHistoryItem,
+  uuid,
+  type ConversationTurn,
+  type HistoryItem,
+} from '@/lib/history';
+
+const ROLE_THEME: Record<
+  Role,
+  { label: string; description: string; icon: string; badgeClass: string }
+> = {
+  eco: {
+    label: '경제해석',
+    description: '금리·환율 등 거시 흐름을 해석한 요약입니다.',
+    icon: '🟣',
+    badgeClass: 'border-[#7C8FFF]/40 bg-[#7C8FFF]/15 text-text',
+  },
+  firm: {
+    label: '기업분석',
+    description: '업종·실적·재무 지표 관점에서 정리했어요.',
+    icon: '🟠',
+    badgeClass: 'border-[#FF8A3D]/40 bg-[#FF8A3D]/15 text-text',
+  },
+  house: {
+    label: '가계조언',
+    description: '개인 재무·포트폴리오 시각의 조언입니다.',
+    icon: '🔵',
+    badgeClass: 'border-[#4AA3FF]/40 bg-[#4AA3FF]/15 text-text',
+  },
+};
+
+const ROLE_ORDER: Role[] = ['eco', 'firm', 'house'];
 
 function useSeries(symbol: SeriesResp['symbol']) {
   return useQuery({
@@ -25,8 +55,9 @@ function useSeries(symbol: SeriesResp['symbol']) {
 
 export default function Page() {
   const [mode, setMode] = useState<Mode>('auto');
-  const [active, setActive] = useState<Role | 'all'>('all');
   const [q, setQ] = useState('');
+  const [conversation, setConversation] = useState<ConversationTurn[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const latestQ = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const queryClient = useQueryClient();
@@ -35,25 +66,55 @@ export default function Page() {
   const ixic = useSeries('IXIC');
 
   const askStream = useAskStream((result) => {
-    saveHistoryItem({
+    const question = latestQ.current;
+    if (!question) return;
+    const convId = conversationId ?? uuid();
+    const turn: ConversationTurn = {
       id: uuid(),
-      ts: Date.now(),
-      q: latestQ.current,
-      mode,
-      roles: result.meta?.roles,
-      result,
+      question,
+      answer: result,
+      askedAt: Date.now(),
+    };
+    setConversation((prev) => {
+      const next = [...prev, turn];
+      const historyEntry: HistoryItem = {
+        id: convId,
+        ts: turn.askedAt,
+        title: next[0]?.question ?? '대화',
+        conversation: next,
+      };
+      saveHistoryItem(historyEntry);
+      queryClient.setQueryData(['history'], loadHistory());
+      return next;
     });
-    queryClient.setQueryData(['history'], loadHistory());
+    setConversationId(convId);
+    setQ('');
   });
 
-  const filtered = useMemo(() => {
-    const cards = askStream.data?.cards ?? [];
-    return active === 'all' ? cards : cards.filter((c) => c.type === active);
-  }, [askStream.data?.cards, active]);
+  const latestAnswer = conversation.length > 0 ? conversation[conversation.length - 1].answer : askStream.data;
 
-  const metrics = askStream.metrics || askStream.data?.metrics || null;
-  const meta = askStream.meta || askStream.data?.meta || null;
-  const statusText = askStream.isLoading ? '질의 중…' : askStream.error ? '오류' : askStream.data ? '완료' : '';
+  const cardsByRole = useMemo(() => {
+    const cards = latestAnswer?.cards ?? [];
+    const grouped: Record<Role, typeof cards> = {
+      eco: [],
+      firm: [],
+      house: [],
+      combined: [],
+    };
+    cards.forEach((card) => {
+      if (grouped[card.type]) {
+        grouped[card.type].push(card);
+      }
+    });
+    return grouped;
+  }, [latestAnswer]);
+  const metrics = askStream.metrics || latestAnswer?.metrics || null;
+  const meta = askStream.meta || latestAnswer?.meta || null;
+  const rolesFromMeta = (meta?.roles ?? []).filter((role): role is Role => ROLE_ORDER.includes(role));
+  const rolesWithCards = ROLE_ORDER.filter((role) => (cardsByRole[role] ?? []).length > 0);
+  const visibleRoles = rolesFromMeta.length
+    ? rolesFromMeta.filter((role) => (cardsByRole[role] ?? []).length > 0)
+    : rolesWithCards;
   const tileClass = 'rounded-3xl border border-border/60 bg-panel/90 p-5 text-sm shadow-soft backdrop-blur';
   const kospiInsight = {
     title: '외국인 차익실현이 코스피를 눌렀어요',
@@ -75,10 +136,8 @@ export default function Page() {
     const trimmed = q.trim();
     if (!trimmed) return;
     latestQ.current = trimmed;
-    setActive('all');
     try {
       await askStream.ask({ q: trimmed, mode });
-      setQ('');
     } catch {
       // error already handled via askStream.error state
     }
@@ -89,6 +148,15 @@ export default function Page() {
       e.preventDefault();
       runAsk();
     }
+  }
+
+  function resetConversation() {
+    askStream.cancel();
+    setConversation([]);
+    setConversationId(null);
+    latestQ.current = '';
+    setQ('');
+    askStream.reset();
   }
 
   return (
@@ -111,7 +179,7 @@ export default function Page() {
       </section>
 
       <section className="relative mx-auto max-w-[1080px] overflow-hidden rounded-3xl border border-border/60 bg-panel/95 px-5 py-6 shadow-soft backdrop-blur md:px-8 md:py-8">
-        <MetricChips data={metrics} className="absolute right-6 top-6 hidden md:flex" />
+        
         <div className="flex flex-col gap-6">
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-chip/80 px-3 py-1 text-[11px] uppercase tracking-wide text-muted">
@@ -123,10 +191,19 @@ export default function Page() {
                   무엇이 궁금하신가요?
                 </h2>
                 <p className="text-sm text-muted md:text-base">
-                  경제 상황이 처음이어도 이해하기 쉽게 요약해 드립니다. 차트·뉴스·정책 변화까지 역할별로 설명해요.
+                  경제해석, 기업분석, 가계 조언 세 전문가가 역할별로 답변을 나눠드려요.
                 </p>
               </div>
-              <ModeSelector value={mode} onChange={setMode} />
+              <div className="flex items-center gap-2">
+                <ModeSelector value={mode} onChange={setMode} />
+                <button
+                  type="button"
+                  onClick={resetConversation}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-chip/70 px-4 py-2 text-sm font-semibold text-muted transition hover:border-accent/50 hover:text-text"
+                >
+                  새 채팅
+                </button>
+              </div>
             </div>
             <ul className="grid gap-2 text-xs text-muted md:grid-cols-3 md:text-sm">
               {sampleQuestions.map((question) => (
@@ -165,41 +242,135 @@ export default function Page() {
                   <span className="kbd">Enter</span>
                   <span>줄바꿈</span>
                 </div>
-                <button
-                  onClick={runAsk}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-accent/50 bg-accent/30 px-5 py-2 text-sm font-semibold text-text transition hover:bg-accent/40"
-                >
-                  질문 보내기
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={runAsk}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-accent/50 bg-accent/30 px-5 py-2 text-sm font-semibold text-text transition hover:bg-accent/40"
+                  >
+                    질문 보내기
+                  </button>
+                </div>
               </div>
             </div>
 
-            <MetricChips data={metrics} className="flex md:hidden" />
+            
           </div>
 
-          <div className="space-y-4 rounded-3xl border border-border/60 bg-chip/75 p-5 text-sm shadow-soft">
-            <h3 className="text-lg font-semibold tracking-tight text-text md:text-xl">답변</h3>
-            <RoleTabs active={active} onChange={setActive} />
-
-            <div className="space-y-2 text-xs text-muted">
-              <div>
-                {statusText}
-                {meta && (
-                  <span className="ml-2">
+          <div className="space-y-5 rounded-3xl border border-border/60 bg-chip/75 p-5 text-sm shadow-soft">
+            {latestQ.current && (
+              <div className="space-y-2 rounded-2xl border border-border/50 bg-panel/80 p-4 text-sm">
+                <div className="text-xs uppercase tracking-wide text-muted">현재 질문</div>
+                <p className="text-base font-semibold text-text">{latestQ.current}</p>
+                {meta?.mode && (
+                  <div className="text-xs text-muted">
                     모드 <b>{meta.mode}</b>
-                    {meta.roles?.length ? ` · ${meta.roles.join(', ')}` : ''}
+                    {meta.roles?.length
+                      ? ` · ${meta.roles
+                          .map((role) => ROLE_THEME[role as Role]?.label ?? role)
+                          .join(', ')}`
+                      : ''}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-text md:text-xl">AI 분석 결과</h3>
+                <p className="text-xs text-muted">질문을 분야별로 정리해 보여드릴게요.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {visibleRoles.length > 0 ? (
+                  visibleRoles.map((role) => {
+                    const theme = ROLE_THEME[role];
+                    return (
+                      <span
+                        key={role}
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium shadow-soft ${theme.badgeClass}`}
+                      >
+                        <span>{theme.icon}</span>
+                        <span>{theme.label}</span>
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-chip/70 px-3 py-1 text-xs text-muted">
+                    분석 대기 중
                   </span>
                 )}
               </div>
-              {askStream.error && <div className="text-bad">{askStream.error}</div>}
+            </div>
+
+            {askStream.error && <div className="text-bad text-sm">{askStream.error}</div>}
+
+            <div className="space-y-5">
+              {conversation.length > 0 ? (
+                conversation.map((turn, idx) => {
+                  const groups = ROLE_ORDER.map((role) => ({
+                    role,
+                    cards: (turn.answer.cards || []).filter((card) => card.type === role),
+                  })).filter((group) => group.cards.length > 0);
+
+                  return (
+                    <section
+                      key={turn.id}
+                      className="space-y-4 rounded-3xl border border-border/50 bg-panel/85 p-5 shadow-soft"
+                    >
+                      <header className="space-y-2">
+                        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted">
+                          <span>질문 {idx + 1}</span>
+                          <span>·</span>
+                          <span>{new Date(turn.askedAt).toLocaleString()}</span>
+                        </div>
+                        <p className="text-base font-semibold text-text">{turn.question}</p>
+                      </header>
+
+                      {groups.length > 0 ? (
+                        <div className="space-y-4">
+                          {groups.map(({ role, cards }) => {
+                            const theme = ROLE_THEME[role];
+                            return (
+                              <div
+                                key={`${turn.id}-${role}`}
+                                className="space-y-3 rounded-2xl border border-border/50 bg-panel/80 p-4 shadow-inner"
+                              >
+                                <div className="flex items-center gap-2 text-text">
+                                  <span className="text-lg">{theme.icon}</span>
+                                  <span className="text-base font-semibold">{theme.label}</span>
+                                </div>
+                                <div className="space-y-4">
+                                  {cards.map((card, i) => (
+                                    <Card key={`${turn.id}-${role}-${i}-${card.title}`} c={card} variant="flat" />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-border/40 bg-panel/80 p-4 text-sm text-muted">
+                          아직 생성된 카드가 없습니다.
+                        </div>
+                      )}
+
+                      {/* {turn.answer.metrics && (
+
+                      )} */}
+                    </section>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-border/50 bg-panel/80 p-6 text-center text-sm text-muted">
+                  대화를 시작하면 카드와 분석이 이곳에 쌓입니다.
+                </div>
+              )}
             </div>
 
             {askStream.lines.length > 0 && (
-              <div className="space-y-3 rounded-2xl border border-border/60 bg-panel/80 p-4 text-sm">
-                <div className="text-xs text-muted">실시간 응답</div>
+              <div className="space-y-3 rounded-2xl border border-border/50 bg-panel/80 p-4 text-sm">
+                <div className="text-xs text-muted">생성 중…</div>
                 <div className="space-y-3">
                   {Object.entries(askStream.grouped).map(([title, lines]) => (
-                    <div key={title} className="rounded-2xl border border-border/50 bg-chip/70 p-4">
+                    <div key={title} className="rounded-2xl border border-border/40 bg-chip/70 p-4">
                       <div className="text-sm font-semibold text-text">{title}</div>
                       <ul className="mt-2 space-y-1 text-sm leading-relaxed text-muted">
                         {lines.map((line) => (
@@ -211,17 +382,22 @@ export default function Page() {
                 </div>
               </div>
             )}
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {filtered.slice(0, 3).map((c, i) => (
-                <Card key={`${c.title}-${i}`} c={c} />
-              ))}
-            </div>
           </div>
 
           <HistoryPanel
-            onRerun={(prevQ) => {
-              setQ(prevQ);
+            onRerun={(item) => {
+              askStream.cancel();
+              setConversationId(item.id);
+              setConversation(item.conversation);
+              const lastTurn = item.conversation[item.conversation.length - 1];
+              if (lastTurn) {
+                latestQ.current = lastTurn.question;
+                askStream.hydrate(lastTurn.answer);
+              } else {
+                latestQ.current = '';
+                askStream.reset();
+              }
+              setQ('');
             }}
           />
 
