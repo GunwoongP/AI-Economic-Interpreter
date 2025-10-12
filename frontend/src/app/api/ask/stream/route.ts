@@ -3,17 +3,6 @@ import { mockAsk } from '../mock';
 
 const encoder = new TextEncoder();
 
-function toSegments(text: string) {
-  return text
-    .split(/\r?\n+/)
-    .flatMap((line) =>
-      line
-        .split(/(?<=[.!?])\s+/)
-        .map((seg) => seg.trim())
-        .filter(Boolean),
-    );
-}
-
 function send(controller: ReadableStreamDefaultController<Uint8Array>, event: unknown) {
   controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 }
@@ -28,37 +17,18 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       send(controller, { type: 'start', data: { ts: started } });
 
-      let firstLineTs: number | null = null;
       const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-      for (const card of payload.cards) {
-        const lines = toSegments(card.content);
-        for (const line of lines) {
-          if (req.signal?.aborted) {
-            controller.close();
-            return;
-          }
-          await delay(120);
-          const now = Date.now();
-          if (!firstLineTs) firstLineTs = now;
-          send(controller, { type: 'line', data: { role: card.type, title: card.title, text: line } });
-        }
-        if (Array.isArray(card.points)) {
-          for (const point of card.points) {
-            if (req.signal?.aborted) {
-              controller.close();
-              return;
-            }
-            await delay(80);
-            send(controller, { type: 'line', data: { role: card.type, title: card.title, text: `• ${point}` } });
-          }
-        }
+      if (req.signal?.aborted) {
+        controller.close();
+        return;
       }
+      await delay(120);
 
       const completed = Date.now();
       payload.metrics = {
         ...payload.metrics,
-        ttft_ms: firstLineTs ? firstLineTs - started : payload.metrics?.ttft_ms,
+        ttft_ms: payload.metrics?.ttft_ms ?? completed - started,
       };
       payload.meta = {
         ...payload.meta,

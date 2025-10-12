@@ -1,11 +1,9 @@
 import type { Card as TCard } from '@/lib/types';
 import { CardSources } from './CardSources';
-import { getConfidenceMeta } from './confidence';
 
 type Props = { card: TCard };
 
 const VARIANT: Record<TCard['type'], string> = {
-  combined: 'from-violet-500/15 via-sky-500/10 to-emerald-500/5',
   eco: 'from-sky-500/20 via-cyan-500/15 to-slate-500/5',
   firm: 'from-orange-500/20 via-amber-500/10 to-rose-500/5',
   house: 'from-blue-500/15 via-emerald-500/10 to-lime-500/5',
@@ -20,10 +18,9 @@ function splitContent(content?: string) {
 }
 
 export default function InsightCard({ card }: Props) {
-  const confMeta = getConfidenceMeta(card.conf);
   const parts = splitContent(card.content);
   const variant = VARIANT[card.type] || 'from-accent/20 to-accent/5';
-  const heading = card.type === 'combined' ? '통합 해석' : card.type === 'eco' ? '거시 핵심' : '핵심 인사이트';
+  const heading = card.type === 'eco' ? '거시 핵심' : '핵심 인사이트';
 
   return (
     <article className="space-y-3 rounded-2xl border border-border bg-panel p-4 shadow-soft">
@@ -33,11 +30,6 @@ export default function InsightCard({ card }: Props) {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{heading}</div>
             <h3 className="text-base font-semibold">{card.title}</h3>
           </div>
-          {confMeta && (
-            <span className={`badge cursor-help ${confMeta.className}`} title={confMeta.title}>
-              {confMeta.label}
-            </span>
-          )}
         </div>
         <div className="mt-2 space-y-2 text-sm leading-relaxed">
           {parts.map((line, idx) => (

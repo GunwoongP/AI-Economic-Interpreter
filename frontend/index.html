@@ -84,7 +84,6 @@
   .chartHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .badgeMini{font-size:11px;border:1px solid var(--border);background:var(--chip);padding:4px 8px;border-radius:999px}
   .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
-  .conf{font-size:11px}
   .foot{margin-top:16px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 </style>
 </head>
@@ -173,7 +172,7 @@
   <section class="panel">
     <div class="small">
       <strong>백엔드 인터페이스(권장)</strong><br/>
-      • <code>POST /ask</code> → <code>{"q": "..."} </code> 반환: <code>{"cards":[{type:"eco|firm|house|combined", title, content, sources[], points[] }...], "metrics":{ttft_ms,tps,tokens,conf}}</code><br/>
+      • <code>POST /ask</code> → <code>{"q": "..."} </code> 반환: <code>{"cards":[{type:"eco|firm|house|combined", title, content, sources[], points[] }...], "metrics":{ttft_ms,tps,tokens}}</code><br/>
       • <code>GET /timeseries?symbol=KOSPI|IXIC&range=3M</code> → <code>{symbol,stamp,values:[{t,close},...]}</code>
     </div>
   </section>
@@ -272,7 +271,6 @@ function renderMetrics(m){
   if(m.ttft_ms!=null) metricsEl.appendChild(metricChip('TTFT',m.ttft_ms+'ms'));
   if(m.tps!=null)     metricsEl.appendChild(metricChip('TPS',m.tps));
   if(m.tokens!=null)  metricsEl.appendChild(metricChip('Tokens',m.tokens));
-  if(m.conf!=null)    metricsEl.appendChild(metricChip('Conf',m.conf));
 }
 
 /* ================= ASK ================= */
@@ -389,7 +387,7 @@ function mockAsk(q){
       {type:'firm', title:'삼성전자 재무 요약', content:'PER 14, ROE 8%, 부채비율 20% (최근 4개 분기 평균).', sources:['finance.db/company']},
       {type:'house', title:'가계 포트폴리오 원칙', content:'비상금 3–6개월, 고금리 부채 우선상환 후 위험자산은 점진 배분. 장기 분산이 손실확률을 낮춤.'}
     ],
-    metrics:{ttft_ms:120,tps:40.1,tokens:88,conf:0.72}
+    metrics:{ttft_ms:120,tps:40.1,tokens:88}
   };
 }
 function mockSeries(symbol){
