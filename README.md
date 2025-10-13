@@ -1,8 +1,7 @@
 # 🧠 AI-Economic-Interpreter
 
-AI-Economic-Interpreter는 실시간 경제 지수(KOSPI, NASDAQ 등)를 해석하고  
-뉴스·정책·자금흐름 기반으로 “한 줄 요약 + 역할별 전문가 분석(Eco/Firm/House)”을 자동 생성하는  
-통합 AI 해석 시스템입니다.
+**AI-Economic-Interpreter**는 실시간 경제 지수(KOSPI, NASDAQ 등)와 뉴스·정책·자금 흐름을 해석하여  
+“한 줄 요약 + 역할별 전문가 분석(Eco / Firm / House)”을 자동 생성하는 통합 AI 경제 해석 시스템입니다.
 
 ---
 
@@ -11,68 +10,57 @@ AI-Economic-Interpreter는 실시간 경제 지수(KOSPI, NASDAQ 등)를 해석�
 ```
 [Client / Browser]
 └─ Frontend (Next.js / TypeScript)
-   • /          : 대시보드 (상식, 지수 스파크라인, 한줄 해석)
-   • /ask       : 모드/역할 선택, 카드 3장
-   • Theme/Mode Store : 테마/모드 관리
-   • Error/Skeleton   : 오류 및 로딩 UI
-   • Source/Conf 등   : 소스/신뢰도 뱃지
-   │
-[HTTPS / JSON 통신]
-   │
+   ├─ /              : 대시보드(경제 상식, 지수 스파크라인, 한줄 해석)
+   ├─ /ask           : 모드/역할 선택, 3가지 분석 카드
+   ├─ Theme/Mode Store : 테마/모드 관리
+   ├─ Error/Skeleton   : 오류 및 로딩 UI
+   └─ Source/Conf 등   : 소스/신뢰도 뱃지
+        │
+[HTTPS / JSON]
+        │
 [API Gateway / Backend (Node.js / Express / TypeScript)]
-   ├─ /ask           : 오케스트레이션 엔드포인트
-   ├─ /timeseries    : 시계열(코스피/나스닥) 캐시
-   ├─ /health        : 서버 상태 확인
-   ├─ auth/metering  : (옵션) API Key / Rate limit
-   └─ 내부 라이브러리 : rag/, db/, model/, safety/, cache/, observability/
-   │
+   ├─ /ask              : 오케스트레이션 엔드포인트
+   ├─ /timeseries       : (캐시) 시계열 지수 API
+   ├─ /health           : 서버 상태 체크
+   ├─ auth/metering     : (옵션) API Key, Rate limit
+   └─ 내부 라이브러리    : rag/, db/, model/, safety/, cache/, observability/
+        │
 [gRPC / HTTP (LAN)]
-   │
+        │
 [AI Core (Python / FastAPI)]
-   ├─ /generate_draft: 역할별 초안 생성 (LoRA 자동 장착)
-   └─ /generate_edit : 편집자(합성/정제)
-   │
+   ├─ /generate_draft   : 역할별 초안 생성 (LoRA 자동 장착)
+   └─ /generate_edit    : 편집자(합성/정제)
+        │
 [Local I/O]
-   │
+        │
 [Data Plane]
-   ├─ Vector DB        : macro/firm/household 네임스페이스
-   ├─ SQLite (finance.db): 정형 재무/메타 데이터
-   └─ TS Cache         : 시계열 데이터 캐시 (KOSPI/IXIC, TTL 5~15분)
+   ├─ Vector DB            : macro/firm/household 네임스페이스
+   ├─ SQLite (finance.db)  : 정형 재무/메타 데이터
+   └─ TS Cache             : 시계열 데이터 캐시 (KOSPI/IXIC, TTL 5~15분)
 ```
 
 ---
 
-## 🔧 주요 구성 요소
+## 🔑 주요 기능
 
-### 🩵 프론트엔드
-- Next.js 기반 대시보드 및 질의/카드 UI
-- 테마/모드, 오류 처리, 소스 신뢰도 표시 등
-
-### 🧩 백엔드 API 게이트웨이
-- 데이터 오케스트레이션, 시계열 데이터 캐싱
-- 인증 및 메타링, 내부 라이브러리 분리
-
-### 🧠 AI Core
-- 역할별 초안 생성 및 편집
-- LoRA 어댑터 자동 장착(역할별 디렉터리 및 환경 변수 지원)
-
-### 📊 데이터 플레인
-- 벡터 DB: 문서 임베딩 및 검색용
-- SQLite: 재무/메타 정형 데이터
-- 시계열 캐시: 주기적 외부 데이터 동기화
+- **실시간 경제 지수 해석** (KOSPI, NASDAQ 등)
+- **뉴스·정책·자금 흐름 기반 전문가 분석** (Eco / Firm / House)
+- **역할별 LoRA 어댑터** 이용 초개인화 해석 가능
+- **RAG 기반 근거 검색** 및 근거 데이터 활용 *(확장 예정)*
+- **데이터 파이프라인**: 시계열 캐시, 벡터 DB, SQLite 통합
 
 ---
 
-## ⚙️ 사용 방법 (Usage)
+## ⚙️ 사용법
 
-### 1️⃣ 사전 준비물
+### 1. 요구 환경
 
 - Node.js ≥ 18
 - Python ≥ 3.10
 - (선택) Docker / Docker Compose
-- GPU 사용 시: CUDA + PyTorch 환경
+- GPU 사용 시: CUDA + PyTorch
 
-### 2️⃣ 환경 변수 (.env)
+### 2. 환경 변수 설정
 
 루트 `.env.example` 참고:
 
@@ -99,28 +87,26 @@ cp .env.example frontend/.env
 cp .env.example ai/.env
 ```
 
-### 3️⃣ 설치
+### 3. 설치
 
 ```bash
-# 루트 기준
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt  # Python 패키지 설치
+pip install -r requirements.txt
 
 cd backend && npm i && cd ..
 cd frontend && npm i && cd ..
 ```
 
-### 4️⃣ 실행 (개발모드)
+### 4. 개발모드 실행
 
 1. **시장 데이터 API (FastAPI)**
 
+```bash
 python3 -m venv .venv
-
 source .venv/bin/activate
-
 pip install -r requirements.txt
-
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
 
 2. **AI Core, Backend, Frontend**
 
@@ -138,53 +124,49 @@ cd frontend
 npm run dev              # http://localhost:3000
 ```
 
-> 전체 플로우: Frontend(3000) → Backend(3001) → AI Core(8008)
+> 전체 데이터 흐름: **Frontend(3000) → Backend(3001) → AI Core(8008)**
 
-### 5️⃣ LoRA 어댑터 구성
+### 5. LoRA 어댑터 활용 (역할별 분석 강화)
 
-- 기본 위치: `ai/eco/lora/`, `ai/firm/lora/`, `ai/house/lora/`  
-  각 디렉터리에서 `adapter_config.json`이 포함된 하위 폴더(예: `final/`)를 자동으로 탐색합니다.
-- 환경 변수로 경로를 재정의할 수 있습니다.
-  ```bash
-  export ECO_LORA_PATH=/path/to/eco_adapter
-  export FIRM_LORA_PATH=/path/to/firm_adapter
-  export HOUSE_LORA_PATH=/path/to/house_adapter
-  # 공통 경로 지정 시
-  export LORA_PATH=/shared/lora
-  ```
-- 서버 기동 시 콘솔 로그에 `lora=/...`가 표시되면 정상 장착된 것입니다. peft 미설치나 경로 오류는 즉시 예외로 표시됩니다.
-- LoRA를 사용하지 않으려면 해당 환경 변수를 비우고 역할 디렉터리에서 어댑터 파일을 제거하세요.
+- 디렉터리: `ai/eco/lora/`, `ai/firm/lora/`, `ai/house/lora/`
+- 각 역할별 LoRA 어댑터 디렉터리에 `adapter_config.json`이 포함된 하위폴더(예: `final/`) 자동 탐색
+- 환경 변수로 경로 재정의 가능
 
-### 6️⃣ Docker Compose 실행
+```bash
+export ECO_LORA_PATH=/path/to/eco_adapter
+export FIRM_LORA_PATH=/path/to/firm_adapter
+export HOUSE_LORA_PATH=/path/to/house_adapter
+# 공통경로: export LORA_PATH=/shared/lora
+```
+
+- 서버 기동 시 콘솔에 `lora=/...` 로그 출력 → 정상 장착
+- 사용 중지: 환경 변수 비우고 어댑터 파일 제거
+
+### 6. Docker Compose
 
 ```bash
 docker compose up --build
-# frontend:3000, backend:3001, ai:8008 자동 연결
+# frontend(3000), backend(3001), ai(8008) 자동 연결
 ```
 
-### 7️⃣ 빠른 테스트
+### 7. 빠른 테스트
 
 ```bash
-# 헬스체크
 curl http://localhost:3001/health
-
-# 질의 API
 curl -X POST http://localhost:3001/ask -H "Content-Type: application/json" \
   -d '{"q":"코스피가 뭐야","roles":["eco"],"mode":"parallel"}'
-
-# 시장 데이터 (FastAPI)
 curl "http://127.0.0.1:8000/series/KOSPI"
 ```
 
-### 8️⃣ 프론트엔드 라우트
+### 8. 프론트엔드 라우트
 
-| 경로         | 설명                                   |
-|--------------|----------------------------------------|
-| `/`          | 대시보드 (경제 상식, 스파크라인, 한줄 해석) |
-| `/ask`       | 질의 입력 → 모드/역할 선택 → 카드 3장(Eco/Firm/House) |
-| `/history`   | 질의 기록/결과 저장 (추후 DB 연동)         |
+| 경로         | 설명                                           |
+|--------------|------------------------------------------------|
+| `/`          | 대시보드 (경제 상식, 스파크라인, 한줄 해석)     |
+| `/ask`       | 질의 입력 → 모드/역할 선택 → Eco/Firm/House 카드 |
+| `/history`   | 질의 기록/결과 저장 (추후 DB 연동)              |
 
-### 9️⃣ 데이터 플레인
+### 9. 데이터 플레인 구조
 
 ```
 data/
@@ -194,7 +176,7 @@ data/
  └─ finance.db   # SQLite (정형 데이터)
 ```
 
-**SQLite 스키마 예시:**
+**SQLite 예시:**
 ```sql
 CREATE TABLE IF NOT EXISTS history(
   id INTEGER PRIMARY KEY,
@@ -204,15 +186,13 @@ CREATE TABLE IF NOT EXISTS history(
 );
 ```
 
-### 🔟 AI Core API
+### 10. AI Core API
 
-| Endpoint           | 설명                    |
-|--------------------|-----------------------|
-| `/chat`            | 기본 대화 (현재 사용)    |
-| `/generate_draft`  | 역할별 초안 생성        |
-| `/generate_edit`   | 에디터 합성/정제        |
-
-> FastAPI 인스턴스는 서버 시작 시 LoRA를 자동 장착하며 별도 `/attach_lora` 엔드포인트가 필요 없습니다.
+| Endpoint           | 설명                         |
+|--------------------|-----------------------------|
+| `/chat`            | 기본 대화 (현재 사용)        |
+| `/generate_draft`  | 역할별 초안 생성             |
+| `/generate_edit`   | 에디터 합성/정제             |
 
 **응답 예시:**
 ```json
@@ -222,9 +202,10 @@ CREATE TABLE IF NOT EXISTS history(
 }
 ```
 
-### 🔟 런 스크립트 (권장)
+### 11. 런 스크립트 예시
 
-`scripts/dev.sh` 예시:
+`scripts/dev.sh`:
+
 ```bash
 #!/usr/bin/env bash
 set -e
@@ -234,6 +215,7 @@ set -e
 ```
 
 실행:
+
 ```bash
 chmod +x scripts/dev.sh
 ./scripts/dev.sh
@@ -241,33 +223,38 @@ chmod +x scripts/dev.sh
 
 ---
 
-## 🧩 트러블슈팅
+## 🚑 트러블슈팅
 
-- `roles.filter` 에러: /ask에서 roles 미지정 시 기본값 ["eco"]로 처리
-- 빈 응답: AI Core trust_remote_code=True, 폴백 요약 로직 추가
-- CORS 문제: 백엔드에서 프론트 도메인 허용
-- 지연: 카드 하단에 TTFT / Tokens / TPS / Conf 표시로 모니터링
+- `/ask` roles 미지정 → 기본값 `["eco"]` 자동 적용
+- 빈 응답 시: AI Core trust_remote_code=True, 폴백 요약 로직 있음
+- CORS 문제: 백엔드에서 프론트 도메인 허용 필요
+- 지연 시: 카드 하단 TTFT / Tokens / TPS / Conf 등 실시간 모니터링
 
 ---
 
-## 📦 핵심 기술 스택
+## 🧰 기술 스택
 
 | 구분       | 기술                                  |
-|----------|--------------------------------------|
-| Frontend | Next.js 14, TypeScript, Tailwind     |
-| Backend  | Node.js, Express, TypeScript         |
-| AI Core  | FastAPI, Transformers, Exaone-3.5    |
-| Data     | FAISS, SQLite, RAG                   |
-| Infra    | Docker, .env, Localhost Bridge       |
+|------------|--------------------------------------|
+| Frontend   | Next.js 14, TypeScript, Tailwind     |
+| Backend    | Node.js, Express, TypeScript         |
+| AI Core    | FastAPI, Transformers, Exaone-3.5    |
+| Data       | FAISS, SQLite, RAG                   |
+| Infra      | Docker, .env, Localhost Bridge       |
 
 ---
 
-## ✅ 프로젝트 상태
+## 🚦 프로젝트 현황
 
-| 항목           | 상태   | 설명                        |
-|--------------|------|---------------------------|
-| 프론트엔드 UI    | ✅ 완성 | 대시보드 + 질문 카드 UI         |
-| 백엔드 REST API | ✅ 완성 | /ask, /timeseries, /health |
-| AI Core 연결     | ✅ 성공 | 로컬 Exaone                  |
-| E2E 흐름        | ✅ 정상 | Front→Back→AI 완전 연결        |
-| RAG / 근거검색   | 🚧 예정 | 성능지표 / LoRA 확장 예정       |
+| 항목           | 상태   | 설명                              |
+|----------------|--------|-----------------------------------|
+| 프론트엔드 UI    | ✅     | 대시보드 + 질문 카드 UI           |
+| 백엔드 REST API | ✅     | /ask, /timeseries, /health        |
+| AI Core 연결     | ✅     | 로컬 Exaone                       |
+| E2E 흐름        | ✅     | Front → Back → AI 완전 연결        |
+| RAG / 근거검색   | 🚧     | 성능지표 / LoRA 확장 예정          |
+
+---
+
+> **AI-Economic-Interpreter**는 역할별 LoRA 어댑터 장착으로  
+> 더욱 전문적이고 세분화된 경제 해석을 제공합니다.
