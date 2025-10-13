@@ -29,8 +29,7 @@ AI-Economic-Interpreter는 실시간 경제 지수(KOSPI, NASDAQ 등)를 해석�
 [gRPC / HTTP (LAN)]
    │
 [AI Core (Python / FastAPI)]
-   ├─ /attach_lora   : ECO/FIRM/HOUSE 어댑터 장착
-   ├─ /generate_draft: 역할별 초안 생성
+   ├─ /generate_draft: 역할별 초안 생성 (LoRA 자동 장착)
    └─ /generate_edit : 편집자(합성/정제)
    │
 [Local I/O]
@@ -55,7 +54,7 @@ AI-Economic-Interpreter는 실시간 경제 지수(KOSPI, NASDAQ 등)를 해석�
 
 ### 🧠 AI Core
 - 역할별 초안 생성 및 편집
-- LoRA 어댑터 확장 지원
+- LoRA 어댑터 자동 장착(역할별 디렉터리 및 환경 변수 지원)
 
 ### 📊 데이터 플레인
 - 벡터 DB: 문서 임베딩 및 검색용
@@ -141,14 +140,29 @@ npm run dev              # http://localhost:3000
 
 > 전체 플로우: Frontend(3000) → Backend(3001) → AI Core(8008)
 
-### 5️⃣ Docker Compose 실행
+### 5️⃣ LoRA 어댑터 구성
+
+- 기본 위치: `ai/eco/lora/`, `ai/firm/lora/`, `ai/house/lora/`  
+  각 디렉터리에서 `adapter_config.json`이 포함된 하위 폴더(예: `final/`)를 자동으로 탐색합니다.
+- 환경 변수로 경로를 재정의할 수 있습니다.
+  ```bash
+  export ECO_LORA_PATH=/path/to/eco_adapter
+  export FIRM_LORA_PATH=/path/to/firm_adapter
+  export HOUSE_LORA_PATH=/path/to/house_adapter
+  # 공통 경로 지정 시
+  export LORA_PATH=/shared/lora
+  ```
+- 서버 기동 시 콘솔 로그에 `lora=/...`가 표시되면 정상 장착된 것입니다. peft 미설치나 경로 오류는 즉시 예외로 표시됩니다.
+- LoRA를 사용하지 않으려면 해당 환경 변수를 비우고 역할 디렉터리에서 어댑터 파일을 제거하세요.
+
+### 6️⃣ Docker Compose 실행
 
 ```bash
 docker compose up --build
 # frontend:3000, backend:3001, ai:8008 자동 연결
 ```
 
-### 6️⃣ 빠른 테스트
+### 7️⃣ 빠른 테스트
 
 ```bash
 # 헬스체크
@@ -162,7 +176,7 @@ curl -X POST http://localhost:3001/ask -H "Content-Type: application/json" \
 curl "http://127.0.0.1:8000/series/KOSPI"
 ```
 
-### 7️⃣ 프론트엔드 라우트
+### 8️⃣ 프론트엔드 라우트
 
 | 경로         | 설명                                   |
 |--------------|----------------------------------------|
@@ -170,7 +184,7 @@ curl "http://127.0.0.1:8000/series/KOSPI"
 | `/ask`       | 질의 입력 → 모드/역할 선택 → 카드 3장(Eco/Firm/House) |
 | `/history`   | 질의 기록/결과 저장 (추후 DB 연동)         |
 
-### 8️⃣ 데이터 플레인
+### 9️⃣ 데이터 플레인
 
 ```
 data/
@@ -190,14 +204,15 @@ CREATE TABLE IF NOT EXISTS history(
 );
 ```
 
-### 9️⃣ AI Core API
+### 🔟 AI Core API
 
 | Endpoint           | 설명                    |
 |--------------------|-----------------------|
 | `/chat`            | 기본 대화 (현재 사용)    |
-| `/attach_lora`     | 역할별 LoRA 어댑터 장착 |
 | `/generate_draft`  | 역할별 초안 생성        |
 | `/generate_edit`   | 에디터 합성/정제        |
+
+> FastAPI 인스턴스는 서버 시작 시 LoRA를 자동 장착하며 별도 `/attach_lora` 엔드포인트가 필요 없습니다.
 
 **응답 예시:**
 ```json
