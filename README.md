@@ -73,10 +73,17 @@ TIMESERIES_CACHE_TTL=600
 # --- Frontend ---
 NEXT_PUBLIC_API_BASE=http://localhost:3001
 
+# --- Router / AI Endpoints ---
+ROUTER_AI_BASE=http://localhost:8008
+ECO_AI_BASE=http://localhost:8008
+FIRM_AI_BASE=http://localhost:8008
+HOUSE_AI_BASE=http://localhost:8008
+EDITOR_AI_BASE=http://localhost:8008
+
 # --- AI Core ---
 AI_HOST=0.0.0.0
 AI_PORT=8008
-MODEL_ID=LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct
+MODEL_ID=Qwen/Qwen3-0.6B
 ```
 
 복사 예시:
@@ -87,46 +94,69 @@ cp .env.example frontend/.env
 cp .env.example ai/.env
 ```
 
+> `ROUTER_AI_BASE`는 라우터에 사용할 Qwen3-0.6B(OpenAI 호환) 엔드포인트를 가리킵니다. 별도 프록시나 포트를 쓸 경우 `ECO_AI_BASE` / `FIRM_AI_BASE` / `HOUSE_AI_BASE` / `EDITOR_AI_BASE`를 해당 서비스의 `/chat` 주소로 덮어쓰세요.
+
 ### 3. 설치
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+# 1) Python 가상환경 및 공통 패키지
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
+# 2) Backend / Frontend 의존성
 cd backend && npm i && cd ..
 cd frontend && npm i && cd ..
 ```
 
-### 4. 개발모드 실행
+### 4. 통합 실행 (`run.sh`)
 
-1. **시장 데이터 API (FastAPI)**
+새로운 실행 스크립트가 네 개의 서비스를 한 번에 기동합니다.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cd Eco-Mentos
+chmod +x run.sh               # 최초 1회
+
+# (선택) 필요 시 환경변수 덮어쓰기
+export MARKET_API_PORT=8010
+export AI_WORKDIR=/path/to/custom/ai
+export ROUTER_AI_BASE=http://localhost:8008
+
+./run.sh
+```
+
+- 기동 서비스  
+  - `market_api` : FastAPI 기반 지수·시세 API (`MARKET_API_PORT`, 기본 8000)  
+  - `ai-core`    : Eco/Firm/House/Editor 라우팅 파이프라인 (기본 8008)  
+  - `backend`    : Express API (`BACKEND_PORT`, 기본 3001)  
+  - `frontend`   : Next.js 클라이언트 (`NEXT_PUBLIC_PORT`, 기본 3000)  
+- 로그는 `logs/*.log` 로 스트리밍되며, Ctrl+C 입력 시 모든 하위 프로세스가 안전하게 종료됩니다.
+
+> 전체 데이터 흐름: **Frontend(3000) → Backend(3001) → AI Router(8008) → 역할별 LoRA 서버**
+
+### 5. 개별 서비스 수동 실행 (선택)
+
+통합 스크립트 대신 각 서비스를 따로 실행하고 싶은 경우:
+
+```bash
+# (1) 시장 데이터 API
+cd market_api
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload
-```
 
-2. **AI Core, Backend, Frontend**
-
-```bash
-# AI Core
+# (2) AI Core (멀티 프로세스 라우터)
 cd ai
-python main.py           # http://localhost:8008
+python main.py
 
-# Backend
+# (3) Backend
 cd backend
-npm run dev              # http://localhost:3001
+npm run dev   # or npm run build && npm start
 
-# Frontend
+# (4) Frontend
 cd frontend
-npm run dev              # http://localhost:3000
+npm run dev
 ```
 
-> 전체 데이터 흐름: **Frontend(3000) → Backend(3001) → AI Core(8008)**
-
-### 5. LoRA 어댑터 활용 (역할별 분석 강화)
+### 6. LoRA 어댑터 활용 (역할별 분석 강화)
 
 - 디렉터리: `ai/eco/lora/`, `ai/firm/lora/`, `ai/house/lora/`
 - 각 역할별 LoRA 어댑터 디렉터리에 `adapter_config.json`이 포함된 하위폴더(예: `final/`) 자동 탐색
@@ -142,23 +172,34 @@ export HOUSE_LORA_PATH=/path/to/house_adapter
 - 서버 기동 시 콘솔에 `lora=/...` 로그 출력 → 정상 장착
 - 사용 중지: 환경 변수 비우고 어댑터 파일 제거
 
-### 6. Docker Compose
+### 7. Docker Compose
 
 ```bash
 docker compose up --build
 # frontend(3000), backend(3001), ai(8008) 자동 연결
 ```
 
-### 7. 빠른 테스트
+### 8. 빠른 테스트
 
 ```bash
+# 헬스 체크
 curl http://localhost:3001/health
-curl -X POST http://localhost:3001/ask -H "Content-Type: application/json" \
-  -d '{"q":"코스피가 뭐야","roles":["eco"],"mode":"parallel"}'
+
+# 자동 라우팅 (질문에 따라 eco→firm)
+curl -s http://localhost:3001/ask \
+  -H "Content-Type: application/json" \
+  -d '{"q":"금리 인상 이후 삼성전자 전망을 알려줘","mode":"auto"}' | jq '.meta.plan_roles,.meta.mode'
+
+# 순차 라우팅 강제 지정 (eco → firm → house)
+curl -s http://localhost:3001/ask \
+  -H "Content-Type: application/json" \
+  -d '{"q":"가계 투자 전략까지 단계별로 정리해줘","roles":["eco","firm","house"]}' | jq '.cards[].title'
+
+# 시장 지수 API
 curl "http://127.0.0.1:8000/series/KOSPI"
 ```
 
-### 8. 프론트엔드 라우트
+### 9. 프론트엔드 라우트
 
 | 경로         | 설명                                           |
 |--------------|------------------------------------------------|
@@ -166,7 +207,7 @@ curl "http://127.0.0.1:8000/series/KOSPI"
 | `/ask`       | 질의 입력 → 모드/역할 선택 → Eco/Firm/House 카드 |
 | `/history`   | 질의 기록/결과 저장 (추후 DB 연동)              |
 
-### 9. 데이터 플레인 구조
+### 10. 데이터 플레인 구조
 
 ```
 data/
@@ -186,7 +227,7 @@ CREATE TABLE IF NOT EXISTS history(
 );
 ```
 
-### 10. AI Core API
+### 11. AI Core API
 
 | Endpoint           | 설명                         |
 |--------------------|-----------------------------|
@@ -201,27 +242,6 @@ CREATE TABLE IF NOT EXISTS history(
   "usage": { "prompt_tokens": 123, "completion_tokens": 98 }
 }
 ```
-
-### 11. 런 스크립트 예시
-
-`scripts/dev.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -e
-(cd ai && python main.py) &
-(cd backend && npm run dev) &
-(cd frontend && npm run dev)
-```
-
-실행:
-
-```bash
-chmod +x scripts/dev.sh
-./scripts/dev.sh
-```
-
----
 
 ## 🚑 트러블슈팅
 

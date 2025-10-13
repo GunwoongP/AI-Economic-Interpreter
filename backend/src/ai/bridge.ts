@@ -1,6 +1,6 @@
 import type { Card, Role, SeriesResp } from '../types.js';
 import { localGenerate, ChatMsg } from './provider_local.js';
-import { draftPrompt, editorPrompt, plannerPrompt, dailyInsightPrompt } from './prompts.js';
+import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt } from './prompts.js';
 
 export async function attachAdapters(_roles: Role[]) {
   return true;
@@ -11,10 +11,40 @@ export async function detachAll() {
 
 type Evidence = { text: string; meta?: any; sim?: number };
 export type AskRole = 'eco' | 'firm' | 'house';
+export interface InsightSnippet {
+  title: string;
+  lines: string[];
+}
 
-function summarizeDraft(draft: Card): string {
-  const body = (draft.content || '').replace(/\s+/g, ' ').slice(0, 320);
-  return `[${draft.type}] ${draft.title}: ${body}`;
+export interface InsightBundle {
+  label: string;
+  kospi?: InsightSnippet | null;
+  ixic?: InsightSnippet | null;
+}
+
+interface SeriesSummaryInfo {
+  trend: string;
+  summary: string;
+  change: number;
+  pct: number;
+  direction: '상승' | '하락' | '보합';
+  latest: number;
+}
+
+function describeSeries(series: SeriesResp): SeriesSummaryInfo {
+  const first = series.values[0];
+  const last = series.values.at(-1)!;
+  const change = last.close - first.close;
+  const pct = first.close ? (change / first.close) * 100 : 0;
+  const direction: SeriesSummaryInfo['direction'] =
+    change > 0 ? '상승' : change < 0 ? '하락' : '보합';
+  const trend = `${series.symbol} ${direction} (${change >= 0 ? '+' : ''}${change.toFixed(
+    2,
+  )}, ${pct.toFixed(2)}%)`;
+  const summary = `${series.stamp} 기준 종가 ${last.close.toFixed(
+    2,
+  )} / ${new Date(first.t).toLocaleDateString()} 대비 ${direction}`;
+  return { trend, summary, change, pct, direction, latest: last.close };
 }
 
 function sanitizeGenerated(raw: string): string {
@@ -47,17 +77,16 @@ export async function genDraft(
     return { type: 'combined', title: '요약', content: 'N/A', conf: 0.5 };
   }
 
-  const previousSummaries =
-    opts.previous?.map(summarizeDraft).slice(-3) ?? [];
+  const previousCards = opts.previous?.slice(-3);
 
   const msgs = draftPrompt(
     role as any,
     q,
     evidences.map((e) => e.text),
-    previousSummaries,
+    previousCards,
   ) as ChatMsg[];
   const { content } = await localGenerate(role, msgs, {
-    max_tokens: 450,
+    max_tokens: 600,
     temperature: 0.2,
   });
   const cleaned = sanitizeGenerated(content) || content;
@@ -91,7 +120,7 @@ export async function genEditor(params: {
     params.mode,
   ) as ChatMsg[];
   const { content } = await localGenerate('editor', msgs, {
-    max_tokens: 700,
+    max_tokens: 900,
     temperature: 0.2,
   });
   const cleaned = sanitizeGenerated(content) || content;
@@ -120,23 +149,56 @@ export async function genEditor(params: {
 }
 
 export interface PlanResult {
-  roles: AskRole[];
+  path: AskRole[];
   mode: 'parallel' | 'sequential';
   reason?: string;
   confidence?: number;
 }
 
-function parsePlannerResponse(raw: string): PlanResult | null {
+const ALLOWED_PATHS: AskRole[][] = [
+  ['eco'],
+  ['firm'],
+  ['house'],
+  ['eco', 'firm'],
+  ['firm', 'house'],
+  ['eco', 'house'],
+  ['eco', 'firm', 'house'],
+];
+
+function normalizePath(path: unknown): AskRole[] | null {
+  if (!Array.isArray(path) || !path.length) return null;
+  const seen = new Set<AskRole>();
+  const normalized: AskRole[] = [];
+  for (const item of path) {
+    if (item === 'eco' || item === 'firm' || item === 'house') {
+      if (!seen.has(item)) {
+        seen.add(item);
+        normalized.push(item);
+      }
+    }
+  }
+  if (!normalized.length) return null;
+  return normalized;
+}
+
+function isAllowed(path: AskRole[]): boolean {
+  return ALLOWED_PATHS.some(
+    (allowed) => allowed.length === path.length && allowed.every((role, idx) => role === path[idx]),
+  );
+}
+
+function parseRouterResponse(raw: string): PlanResult | null {
   try {
-    const text = raw.trim().replace(/^```json\s*|```$/g, '');
+    const text = raw.trim().replace(/^```json\s*|```$/g, '').replace(/^```\s*json\s*/i, '').replace(/```\s*$/g, '');
     const data = JSON.parse(text);
-    if (!Array.isArray(data.roles) || !data.roles.length) return null;
-    const roles = data.roles.filter((r: any) => r === 'eco' || r === 'firm' || r === 'house');
-    if (!roles.length) return null;
-    const mode = data.mode === 'sequential' ? 'sequential' : 'parallel';
+    const path = normalizePath(data.path ?? data.roles);
+    if (!path || !isAllowed(path)) {
+      return null;
+    }
+    const mode = data.mode === 'sequential' || path.length > 1 ? 'sequential' : 'parallel';
     const confidence = typeof data.confidence === 'number' ? data.confidence : undefined;
     return {
-      roles: Array.from(new Set(roles)) as AskRole[],
+      path,
       mode,
       reason: typeof data.reason === 'string' ? data.reason : undefined,
       confidence,
@@ -147,16 +209,85 @@ function parsePlannerResponse(raw: string): PlanResult | null {
 }
 
 export async function planRoles(params: { query: string; prefer?: Role[]; hintMode?: 'auto'|'parallel'|'sequential' }): Promise<PlanResult | null> {
-  const msgs = plannerPrompt(params.query, params.prefer ?? [], params.hintMode ?? 'auto');
+  const msgs = routerPrompt(params.query, params.prefer ?? []);
   try {
-    const response = await localGenerate('planner', msgs, { max_tokens: 200, temperature: 0 });
-    const parsed = parsePlannerResponse(response.content);
+    const response = await localGenerate('router', msgs, { max_tokens: 250, temperature: 0 });
+    const parsed = parseRouterResponse(response.content || response.raw?.content || '');
     if (!parsed) {
-      console.warn('[ASK][planner] unable to parse planner response:', response.content);
+      console.warn('[ASK][router] unable to parse router response:', response.content);
     }
     return parsed ?? null;
   } catch (err) {
-    console.error('[ASK][planner][ERROR]', err);
+    console.error('[ASK][router][ERROR]', err);
+    return null;
+  }
+}
+
+function stripChainOfThought(raw: string): string {
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+function extractJsonObject(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const withoutFence = trimmed
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```\s*$/g, '')
+    .trim();
+  const firstBrace = withoutFence.indexOf('{');
+  const lastBrace = withoutFence.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+    return null;
+  }
+  return withoutFence.slice(firstBrace, lastBrace + 1);
+}
+
+function normalizeLines(value: unknown): string[] {
+  let candidates: string[] = [];
+  if (Array.isArray(value)) {
+    candidates = value.flatMap((item) =>
+      String(item ?? '')
+        .split(/\r?\n+/)
+        .map((line) => line.trim()),
+    );
+  } else if (typeof value === 'string') {
+    candidates = value.split(/\r?\n+/).map((line) => line.trim());
+  }
+  candidates = candidates
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return candidates.slice(0, 3);
+}
+
+function normalizeInsightEntry(entry: any): InsightSnippet | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const rawTitle = typeof entry.title === 'string' ? entry.title.trim() : '';
+  const lines = normalizeLines(entry.lines ?? entry.description ?? entry.text);
+  if (!lines.length) {
+    return null;
+  }
+  const title = (rawTitle || lines[0]).slice(0, 80);
+  return { title, lines };
+}
+
+function parseDailyInsightPayload(raw: string): InsightBundle | null {
+  const jsonText = extractJsonObject(stripChainOfThought(raw));
+  if (!jsonText) return null;
+  try {
+    const parsed = JSON.parse(jsonText);
+    const label =
+      typeof parsed.label === 'string' && parsed.label.trim()
+        ? parsed.label.trim().slice(0, 40)
+        : '오늘의 해설';
+    const kospi = normalizeInsightEntry(parsed.kospi);
+    const ixic = normalizeInsightEntry(parsed.ixic);
+    if (!kospi && !ixic) {
+      return { label, kospi: null, ixic: null };
+    }
+    return { label, kospi: kospi ?? null, ixic: ixic ?? null };
+  } catch {
     return null;
   }
 }
@@ -166,18 +297,7 @@ export async function genDailyInsight(params: {
   kospi: SeriesResp;
   ixic: SeriesResp;
   news: { title: string; description: string; link?: string; pubDate?: string }[];
-}) {
-  const describeSeries = (series: SeriesResp) => {
-    const first = series.values[0];
-    const last = series.values.at(-1)!;
-    const change = last.close - first.close;
-    const pct = first.close ? (change / first.close) * 100 : 0;
-    const direction = change > 0 ? '상승' : change < 0 ? '하락' : '보합';
-    const trend = `${series.symbol} ${direction} (${change >= 0 ? '+' : ''}${change.toFixed(2)}, ${pct.toFixed(2)}%)`;
-    const summary = `${series.stamp} 기준 종가 ${last.close.toFixed(2)} / ${new Date(first.t).toLocaleDateString()} 대비 ${direction}`;
-    return { trend, summary };
-  };
-
+}): Promise<{ summary: string; insights: InsightBundle | null; raw: string }> {
   const kospiInfo = describeSeries(params.kospi);
   const ixicInfo = describeSeries(params.ixic);
   const msgs = dailyInsightPrompt({
@@ -186,6 +306,95 @@ export async function genDailyInsight(params: {
     ixic: ixicInfo,
     news: params.news,
   }) as ChatMsg[];
-  const { content } = await localGenerate('editor', msgs, { max_tokens: 400, temperature: 0.3 });
-  return sanitizeGenerated(content) || content;
+  const response = await localGenerate('editor', msgs, { max_tokens: 420, temperature: 0.2 });
+  const raw = stripChainOfThought(response.raw?.content ?? response.content ?? '');
+  const summary = sanitizeGenerated(raw) || raw;
+  const parsedInsights = parseDailyInsightPayload(raw);
+  const fallback = buildFallbackInsights('오늘의 해설', kospiInfo, ixicInfo, params.news);
+  const insights = mergeInsights(parsedInsights, fallback);
+  return {
+    raw,
+    summary,
+    insights,
+  };
+}
+
+function clampLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+function formatChangeLine(info: SeriesSummaryInfo): string {
+  const change = info.change >= 0 ? `+${info.change.toFixed(2)}` : info.change.toFixed(2);
+  const pct = info.pct >= 0 ? `+${info.pct.toFixed(2)}` : info.pct.toFixed(2);
+  return clampLine(
+    `${info.trend}. 종가는 ${info.latest.toFixed(2)}p로 ${change} (${pct}%) 움직였습니다.`,
+  );
+}
+
+function formatNewsLine(
+  info: SeriesSummaryInfo,
+  newsItem: { title?: string; description?: string } | undefined,
+): string {
+  if (!newsItem) {
+    return clampLine(`주요 원인: ${info.summary}`);
+}
+  const title = newsItem.title?.replace(/<\/?[^>]+>/g, '').trim() || '';
+  const desc = newsItem.description?.replace(/<\/?[^>]+>/g, '').trim() || '';
+  const combined = `${title || desc}`.trim();
+  if (!combined) {
+    return clampLine(`주요 원인: ${info.summary}`);
+  }
+  return clampLine(`핵심 이슈: ${combined}`);
+}
+
+function buildFallbackInsights(
+  label: string,
+  kospiInfo: ReturnType<typeof describeSeries>,
+  ixicInfo: ReturnType<typeof describeSeries>,
+  news: { title: string; description: string }[],
+): InsightBundle {
+  const headlines = Array.isArray(news) ? news : [];
+  const [headline1, headline2] = headlines;
+
+  const makeLines = (
+    info: ReturnType<typeof describeSeries>,
+    headline: { title: string; description: string } | undefined,
+  ): string[] => {
+    const lines: string[] = [];
+    lines.push(formatChangeLine(info));
+    lines.push(formatNewsLine(info, headline));
+    lines.push(clampLine(info.summary));
+    return lines.filter(Boolean).slice(0, 3);
+  };
+
+  const kospiLines = makeLines(kospiInfo, headline1);
+  const ixicLines = makeLines(ixicInfo, headline2 ?? headline1);
+
+  return {
+    label,
+    kospi: kospiLines.length
+      ? {
+          title: clampLine(`코스피 ${kospiInfo.direction} 요약`),
+          lines: kospiLines,
+        }
+      : null,
+    ixic: ixicLines.length
+      ? {
+          title: clampLine(`나스닥 ${ixicInfo.direction} 요약`),
+          lines: ixicLines,
+        }
+      : null,
+  };
+}
+
+function mergeInsights(primary: InsightBundle | null, fallback: InsightBundle): InsightBundle {
+  if (!primary) {
+    return fallback;
+  }
+  const merged: InsightBundle = {
+    label: primary.label || fallback.label,
+    kospi: primary.kospi && primary.kospi.lines?.length ? primary.kospi : fallback.kospi,
+    ixic: primary.ixic && primary.ixic.lines?.length ? primary.ixic : fallback.ixic,
+  };
+  return merged;
 }

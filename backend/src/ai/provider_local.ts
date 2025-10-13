@@ -2,19 +2,20 @@ import type { Role } from '../types.js';
 
 export type ChatMsg = { role: 'system' | 'user' | 'assistant'; content: string };
 
-type Target = Role | 'editor' | 'planner';
+type Target = Role | 'editor' | 'planner' | 'router';
 
 const FALLBACK_BASE =
   process.env.LOCAL_AI_BASE ||
   process.env.AI_BASE_URL ||
   'http://localhost:8008';
 
-const ROLE_BASE: Record<'eco' | 'firm' | 'house' | 'editor' | 'planner', string> = {
+const ROLE_BASE: Record<'eco' | 'firm' | 'house' | 'editor' | 'planner' | 'router', string> = {
   eco: process.env.ECO_AI_BASE || FALLBACK_BASE,
   firm: process.env.FIRM_AI_BASE || FALLBACK_BASE,
   house: process.env.HOUSE_AI_BASE || FALLBACK_BASE,
   editor: process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || FALLBACK_BASE,
   planner: process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || FALLBACK_BASE,
+  router: process.env.ROUTER_AI_BASE || process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || FALLBACK_BASE,
 };
 
 function baseFor(target: Target): string {

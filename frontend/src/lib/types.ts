@@ -37,6 +37,11 @@ export interface DailyInsight {
   news: NewsItem[];
   series: { kospi: SeriesResp; ixic: SeriesResp };
   summary?: string | null;
+  insights?: {
+    label?: string | null;
+    kospi?: { title: string; lines: string[] } | null;
+    ixic?: { title: string; lines: string[] } | null;
+  } | null;
 }
 export interface SeriesPoint { t: number; close: number; volume?: number | null }
 export interface SeriesResp { symbol: 'KOSPI'|'IXIC'; stamp: string; values: SeriesPoint[] }

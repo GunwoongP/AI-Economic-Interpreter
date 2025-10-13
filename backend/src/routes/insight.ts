@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { searchNaverNews, NewsSearchError } from '../services/news.js';
 import { fetchSeries } from './timeseries.js';
-import { genDailyInsight } from '../ai/bridge.js';
+import { genDailyInsight, type InsightBundle } from '../ai/bridge.js';
 
 const router = Router();
 
@@ -16,8 +16,11 @@ router.get('/daily', async (req, res) => {
     ]);
 
     let summary: string | null = null;
+    let insights: InsightBundle | null = null;
     try {
-      summary = await genDailyInsight({ focus: query, kospi, ixic, news });
+      const ai = await genDailyInsight({ focus: query, kospi, ixic, news });
+      summary = ai.summary ?? ai.raw ?? null;
+      insights = ai.insights ?? null;
     } catch (err) {
       console.error('[INSIGHT][daily][gen][ERROR]', err);
     }
@@ -27,6 +30,7 @@ router.get('/daily', async (req, res) => {
       news,
       series: { kospi, ixic },
       summary,
+      insights,
     });
   } catch (err: any) {
     if (err instanceof NewsSearchError) {

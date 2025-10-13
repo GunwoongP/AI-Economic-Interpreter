@@ -8,7 +8,7 @@ import Card from '@/components/Card';
 import ModeSelector from '@/components/ModeSelector';
 import HistoryPanel from '@/components/HistoryPanel';
 import { useAskStream } from '@/hooks/useAskStream';
-import { getSeries } from '@/lib/api';
+import { getDailyInsight, getSeries } from '@/lib/api';
 import type { Mode, Role, SeriesResp } from '@/lib/types';
 import {
   loadHistory,
@@ -44,12 +44,37 @@ const ROLE_THEME: Record<
 
 const ROLE_ORDER: Role[] = ['eco', 'firm', 'house'];
 
+const DEFAULT_INSIGHT_LABEL = '오늘의 해설';
+const DEFAULT_KOSPI_INSIGHT = {
+  title: '외국인 차익실현이 코스피를 눌렀어요',
+  lines: [
+    '원·달러 환율이 다시 1,380원대에 진입하며 외국인과 기관이 동반 순매도로 전환했습니다.',
+    '반도체 단가 조정 뉴스가 전해지며 반도체 업종 전반에 약세가 번졌습니다.',
+  ],
+} as const;
+const DEFAULT_IXIC_INSIGHT = {
+  title: 'AI 성장주가 나스닥 상승을 이끌었어요',
+  lines: [
+    '미 국채 금리가 진정되자 기술주로 자금이 빠르게 회귀했습니다.',
+    '엔비디아와 메가테크 실적 기대감이 살아나면서 투자 심리가 개선되었습니다.',
+  ],
+} as const;
+
 function useSeries(symbol: SeriesResp['symbol']) {
   return useQuery({
     queryKey: ['series', symbol],
     queryFn: () => getSeries(symbol),
     retry: 1,
     staleTime: 1000 * 60 * 15,
+  });
+}
+
+function useDailyInsightData() {
+  return useQuery({
+    queryKey: ['daily-insight'],
+    queryFn: () => getDailyInsight({ limit: 6 }),
+    retry: 1,
+    staleTime: 1000 * 60 * 10,
   });
 }
 
@@ -64,6 +89,7 @@ export default function Page() {
 
   const kospi = useSeries('KOSPI');
   const ixic = useSeries('IXIC');
+  const dailyInsight = useDailyInsightData();
 
   const askStream = useAskStream((result) => {
     const question = latestQ.current;
@@ -115,17 +141,40 @@ export default function Page() {
   const visibleRoles = rolesFromMeta.length
     ? rolesFromMeta.filter((role) => (cardsByRole[role] ?? []).length > 0)
     : rolesWithCards;
+  const dailyData = dailyInsight.data;
+  const insightLabel = dailyData?.insights?.label?.trim() || DEFAULT_INSIGHT_LABEL;
+
+  const kospiInsight = useMemo(() => {
+    const ai = dailyData?.insights?.kospi;
+    const lines = (ai?.lines ?? [])
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    const safeLines = lines.length ? lines : [...DEFAULT_KOSPI_INSIGHT.lines];
+    const title = (ai?.title?.trim() || DEFAULT_KOSPI_INSIGHT.title).slice(0, 80);
+    return {
+      label: insightLabel,
+      title,
+      description: safeLines.join('\n'),
+    };
+  }, [dailyData, insightLabel]);
+
+  const ixicInsight = useMemo(() => {
+    const ai = dailyData?.insights?.ixic;
+    const lines = (ai?.lines ?? [])
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    const safeLines = lines.length ? lines : [...DEFAULT_IXIC_INSIGHT.lines];
+    const title = (ai?.title?.trim() || DEFAULT_IXIC_INSIGHT.title).slice(0, 80);
+    return {
+      label: insightLabel,
+      title,
+      description: safeLines.join('\n'),
+    };
+  }, [dailyData, insightLabel]);
+
   const tileClass = 'rounded-3xl border border-border/60 bg-panel/90 p-5 text-sm shadow-soft backdrop-blur';
-  const kospiInsight = {
-    title: '외국인 차익실현이 코스피를 눌렀어요',
-    description:
-      '원·달러 환율이 다시 1,380원대에 진입하며 외국인과 기관이 동반 순매도로 전환했습니다. 반도체 단가 조정 뉴스가 전해지며 업종 전반에 약세가 번진 하루였습니다.',
-  };
-  const ixicInsight = {
-    title: 'AI 성장주가 나스닥 상승을 이끌었어요',
-    description:
-      '미 국채 금리가 진정되자 기술주로 자금이 빠르게 회귀했습니다. 엔비디아와 메가테크 실적 기대감이 살아나면서 투자 심리가 개선된 것이 지수 상승을 뒷받침했습니다.',
-  };
   const sampleQuestions = [
     '금리가 오르면 내 대출 이자는 어떻게 변할까요?',
     '한국 증시가 하락하면 기업 입장에서는 어떤 전략을 쓰나요?',

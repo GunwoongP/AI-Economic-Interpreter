@@ -1,12 +1,12 @@
-import type { Role } from '../types.js';
+import type { Card, Role } from '../types.js';
 
 export type ChatMsg = { role:'system'|'user'|'assistant'; content:string };
 
-export function draftPrompt(role: 'eco'|'firm'|'house', q: string, evid: string[], previous?: string[]): ChatMsg[] {
+export function draftPrompt(role: 'eco'|'firm'|'house', q: string, evid: string[], previousCards?: Card[]): ChatMsg[] {
   const roleName = role==='eco' ? '거시경제 해석관' : role==='firm'? '기업분석가' : '가계 재정 코치';
   const evidence = evid.slice(0,6).map((t,i)=>`- 근거${i+1}: ${t}`).join('\n');
-  const prior = Array.isArray(previous) && previous.length
-    ? `\n\n이전 전문가 의견 요약:\n${previous.map((p,i)=>`- 이전${i+1}: ${p}`).join('\n')}`
+  const prior = Array.isArray(previousCards) && previousCards.length
+    ? `\n\n이전 단계 결과:\n${previousCards.map((card,i)=>`[${card.type.toUpperCase()} ${i+1}] ${card.title}\n${card.content}`.slice(0, 1000)).join('\n\n')}`
     : '';
   return [
     { role:'system', content:
@@ -95,18 +95,28 @@ export function dailyInsightPrompt(params: {
   ixic: { trend: string; summary: string };
   news: { title: string; description: string; link?: string; pubDate?: string }[];
 }): ChatMsg[] {
-  const newsLines = params.news.slice(0, 6).map((item, idx) => `- [${idx + 1}] ${item.title} :: ${item.description}`).join('\n');
+  const newsLines = params.news
+    .slice(0, 6)
+    .map((item, idx) => `- [${idx + 1}] ${item.title} :: ${item.description}`)
+    .join('\n');
   const context = `KOSPI 흐름: ${params.kospi.trend}\n${params.kospi.summary}\n\nNASDAQ 흐름: ${params.ixic.trend}\n${params.ixic.summary}`;
   return [
     {
       role: 'system',
       content:
-`너는 데일리 시장 해석가다.
-- 입력된 코스피/나스닥 시계열 요약과 최신 뉴스 헤드라인을 분석해 한국어 보고서를 작성한다.
-- 아래 섹션 제목을 정확히 사용하고 마크다운 h2(## 제목)로 작성: 시장 개요, 코스피 분석, 나스닥 분석, 주목 뉴스, 포트폴리오 시사점, 1문장 요약.
-- 각 섹션 요구사항: 시장 개요(2문장), 코스피/나스닥 분석(각 3문장, 상승/하락 요인과 위험, 수치를 포함), 주목 뉴스(불릿 3~5개, [번호] 형식 유지), 포트폴리오 시사점(2문장), 1문장 요약(1문장).
-- 숫자(증감률, 시점)는 가능하면 포함하고, 뉴스 제목 인용 시 번호와 함께 언급한다.
-- 출력은 마크다운을 사용하고, 한국어로만 작성한다.`
+`너는 데일리 시장 해설가다.
+- 입력 데이터를 바탕으로 한국어로 간결한 시장 코멘트를 생성한다.
+- 반드시 JSON 객체 한 줄만 출력한다. 마크다운, 자연어 문장, 설명 문구를 추가하지 마라.
+- JSON 스키마:
+{
+  "label": "오늘의 해설",
+  "kospi": { "title": "...", "lines": ["...", "..."] },
+  "ixic": { "title": "...", "lines": ["...", "..."] }
+}
+- title은 40자 이내, lines 배열은 2~3개의 짧은 문장(또는 줄)로 작성한다.
+- 각 문장은 지수의 등락 이유, 수급/정책/섹터 이슈, 관련 뉴스 번호(예: [1]) 등을 포함한다.
+- 라인당 60자를 넘기지 말고, 연속된 공백/개행을 넣지 마라.
+- <think> 같은 내부 추론을 출력하지 마라.`
     },
     {
       role: 'user',
@@ -118,7 +128,46 @@ ${context}
 뉴스 목록:
 ${newsLines || '- (뉴스 없음)'}
 
-시장 해석을 작성해줘.`
+JSON을 반환해라.`
+    }
+  ];
+}
+
+const ROUTE_OPTIONS_TEXT = [
+  '["eco"] (거시 단독)',
+  '["firm"] (기업 단독)',
+  '["house"] (가계 단독)',
+  '["eco","firm"] (순서: eco → firm)',
+  '["firm","house"] (순서: firm → house)',
+  '["eco","house"] (순서: eco → house)',
+  '["eco","firm","house"] (순서: eco → firm → house)',
+].join('\n- ');
+
+export function routerPrompt(q: string, prefer: Role[] = []): ChatMsg[] {
+  const preferText = prefer.length ? `선호 역할: ${prefer.join(', ')}` : '선호 역할 없음';
+  return [
+    {
+      role: 'system',
+      content:
+`너는 라우터 역할을 수행한다.
+- 입력 질문과 선호 역할 정보를 보고 아래 옵션 중 하나만 선택한다.
+- 옵션은 정확히 아래 JSON 배열 형태 중 하나여야 한다:
+- ${ROUTE_OPTIONS_TEXT}
+- 배열 길이가 1이면 단일 역할 카드만 작성하면 되고, 2개 이상이면 반드시 순차적으로 이전 카드 내용을 참고해야 한다.
+- path 필드는 문자열 배열 그대로 포함한다.
+- mode는 path 길이가 1이면 "parallel", 2 이상이면 "sequential"로 설정한다.
+- reason은 한국어 한 문장으로 작성한다.
+- confidence는 0~1 범위 숫자로 작성한다.
+- 정답은 반드시 JSON 객체 한 줄로 출력하고, 다른 텍스트를 추가하지 마라.`
+    },
+    {
+      role: 'user',
+      content:
+`질문: ${q}
+${preferText}
+
+응답 형식 예시:
+{"path":["eco","firm"],"mode":"sequential","reason":"기업 실적과 거시 정책이 모두 중요하다","confidence":0.78}`
     }
   ];
 }

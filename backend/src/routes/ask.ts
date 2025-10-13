@@ -14,20 +14,62 @@ class AskHttpError extends Error {
   }
 }
 
+const ROLE_ORDER: AskRole[] = ['eco', 'firm', 'house'];
+const ALLOWED_PATHS: AskRole[][] = [
+  ['eco'],
+  ['firm'],
+  ['house'],
+  ['eco', 'firm'],
+  ['firm', 'house'],
+  ['eco', 'house'],
+  ['eco', 'firm', 'house'],
+];
+
+function isAllowedPath(path: AskRole[]): boolean {
+  return ALLOWED_PATHS.some(
+    (allowed) => allowed.length === path.length && allowed.every((role, idx) => role === path[idx]),
+  );
+}
+
+function sanitizeSequence(input?: Role[]): AskRole[] {
+  if (!Array.isArray(input)) return [];
+  const result: AskRole[] = [];
+  for (const role of input) {
+    if ((role === 'eco' || role === 'firm' || role === 'house') && !result.includes(role)) {
+      result.push(role);
+    }
+  }
+  return result;
+}
+
+function enforceAllowed(path: AskRole[]): AskRole[] {
+  if (isAllowedPath(path)) {
+    return path;
+  }
+  const normalized = ROLE_ORDER.filter((role) => path.includes(role));
+  if (normalized.length && isAllowedPath(normalized)) {
+    return normalized;
+  }
+  if (path.length === 1 && (path[0] === 'eco' || path[0] === 'firm' || path[0] === 'house')) {
+    return path;
+  }
+  return ['eco'];
+}
+
 // ✅ 질문에서 역할 자동 분류 (prefer 병합)
-function selectRoles(q: string, prefer: Role[] = []): Role[] {
+function selectRoles(q: string, prefer: Role[] = []): AskRole[] {
   const s = (q || '').toLowerCase();
-  const R = new Set<Role>(Array.isArray(prefer) ? prefer : []);
+  const buffer: Role[] = Array.isArray(prefer) ? prefer.slice(0, 3) : [];
 
-  // 거시
-  if (/(금리|환율|정책|경기|물가|부동산|dxy|유가)/.test(s)) R.add('eco');
-  // 기업
-  if (/(per|roe|재무|실적|기업|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) R.add('firm');
-  // 가계
-  if (/(가계|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지)/.test(s)) R.add('house');
+  if (/(금리|환율|정책|경기|물가|부동산|dxy|유가)/.test(s)) buffer.push('eco');
+  if (/(per|roe|재무|실적|기업|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) buffer.push('firm');
+  if (/(가계|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지)/.test(s)) buffer.push('house');
 
-  if (!R.size) R.add('eco'); // 기본값
-  return Array.from(R).slice(0, 3);
+  const sanitized = sanitizeSequence(buffer);
+  if (!sanitized.length) {
+    sanitized.push('eco');
+  }
+  return enforceAllowed(sanitized);
 }
 
 // ✅ 자동/병렬/순차 모드 선택
@@ -49,20 +91,6 @@ interface PreparedAsk {
   planConfidence?: number;
 }
 
-const ROLE_ORDER: AskRole[] = ['eco', 'firm', 'house'];
-
-function normalizeRoles(input?: Role[]): AskRole[] {
-  const set = new Set<AskRole>();
-  (input ?? []).forEach((role) => {
-    if (role === 'eco' || role === 'firm' || role === 'house') {
-      set.add(role);
-    }
-  });
-  const ordered = ROLE_ORDER.filter((r) => set.has(r));
-  if (!ordered.length) ordered.push('eco');
-  return ordered;
-}
-
 async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
   const q = String(body.q ?? '').slice(0, 2000);
 
@@ -70,7 +98,8 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
     throw new AskHttpError(400, 'q is required');
   }
 
-  const explicit = normalizeRoles(Array.isArray(body.roles) ? body.roles : undefined);
+  const explicitRaw = sanitizeSequence(Array.isArray(body.roles) ? body.roles : undefined);
+  const explicit = explicitRaw.length ? enforceAllowed(explicitRaw) : [];
   const preferList = Array.isArray(body.prefer) ? body.prefer : [];
   const fallback = selectRoles(q, preferList);
   const plannerEnabled = !explicit.length;
@@ -79,21 +108,31 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
     planner = await planRoles({ query: q, prefer: preferList, hintMode: (body.mode ?? 'auto') as any });
   }
 
-  const plannerRoles = planner?.roles ?? [];
-  const mergedRoles = explicit.length
+  const plannerPath = planner?.path ?? [];
+  const mergedPath = explicit.length
     ? explicit
-    : normalizeRoles(Array.from(new Set([...plannerRoles, ...fallback])));
+    : plannerPath.length
+    ? enforceAllowed(plannerPath)
+    : fallback;
 
-  const mode = planner?.mode ?? selectMode(q, (body.mode ?? 'auto') as any);
-  const generationRoles = [...mergedRoles];
+  const hasExplicitMode = body.mode && body.mode !== 'auto';
+  let mode = planner?.mode ?? (mergedPath.length > 1 ? 'sequential' : 'parallel');
+  if (hasExplicitMode) {
+    mode = body.mode as 'parallel' | 'sequential';
+  } else if (!planner?.mode && mergedPath.length <= 1) {
+    mode = selectMode(q, (body.mode ?? 'auto') as any);
+  }
+
+  const generationRoles: AskRole[] = mergedPath.length ? mergedPath : ['eco'];
+  const uniqueRoles = Array.from(new Set(generationRoles)) as Role[];
 
   return {
     q,
-    roles: mergedRoles as Role[],
+    roles: uniqueRoles,
     mode,
-    generationRoles: generationRoles.length ? Array.from(new Set(generationRoles)) : ['eco'],
+    generationRoles,
     planReason: planner?.reason,
-    planRoles: plannerRoles.length ? plannerRoles : undefined,
+    planRoles: plannerPath.length ? plannerPath : undefined,
     planConfidence: planner?.confidence,
   };
 }
