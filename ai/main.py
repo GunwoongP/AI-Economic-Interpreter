@@ -1,52 +1,145 @@
-import os, torch
-from fastapi import FastAPI
-from pydantic import BaseModel
-import uvicorn
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from __future__ import annotations
 
-MODEL_ID = os.environ.get("MODEL_ID", "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct")
-TEMP = float(os.environ.get("TEMP", "0.2"))
-MAX_NEW = int(os.environ.get("MAX_NEW", "512"))
+import os
+import signal
+import sys
+from multiprocessing import Process
+from typing import Dict, Tuple
 
-print(f"Loading tokenizer for {MODEL_ID}...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True, use_fast=True)
+from server_base import run_server
 
-print(f"Loading model {MODEL_ID}...")
-load_kwargs = dict(trust_remote_code=True)
-if torch.cuda.is_available():
-    load_kwargs.update(dict(torch_dtype=torch.float16, device_map="auto"))
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
-print("Model loaded successfully.")
+ROLE_CONFIG: Tuple[Tuple[str, str, str, int], ...] = (
+  ("eco", "ECO_PORT", "ECO_MODEL_ID", 8001),
+  ("firm", "FIRM_PORT", "FIRM_MODEL_ID", 8002),
+  ("house", "HOUSE_PORT", "HOUSE_MODEL_ID", 8003),
+)
 
-app = FastAPI()
 
-class ChatIn(BaseModel):
-    messages: list[dict]   # [{role:'system'|'user'|'assistant', content:str}]
-    max_tokens: int = MAX_NEW
-    temperature: float = TEMP
+def should_trace_queries() -> bool:
+  flag = os.environ.get("AI_TRACE_LOGS")
+  if flag is None:
+    return True
+  return flag.lower() not in {"0", "false", "off", "no"}
 
-def to_prompt(msgs):
-    sys = next((m["content"] for m in msgs if m.get("role")=="system"), "")
-    users = "\n\n".join([m["content"] for m in msgs if m.get("role")=="user"])
-    # EXAONE/인스트럭션 계열에 잘 먹는 간단 포맷
-    return (f"[SYSTEM]\n{sys}\n\n" if sys else "") + f"[USER]\n{users}\n\n[ASSISTANT]\n"
 
-@app.post("/chat")
-def chat(inp: ChatIn):
-    prompt = to_prompt(inp.messages)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    out = model.generate(
-        **inputs,
-        max_new_tokens=inp.max_tokens,
-        temperature=inp.temperature,
-        do_sample=inp.temperature > 0,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    text = tokenizer.decode(out[0], skip_special_tokens=True)
-    # 프롬프트 부분 제거
-    resp = text[len(prompt):].strip()
-    return {"content": resp}
+def resolve_float(*keys: str, default: float) -> float:
+  for key in keys:
+    val = os.environ.get(key)
+    if val is not None:
+      try:
+        return float(val)
+      except ValueError:
+        pass
+  return default
+
+
+def resolve_int(*keys: str, default: int) -> int:
+  for key in keys:
+    val = os.environ.get(key)
+    if val is not None:
+      try:
+        return int(val)
+      except ValueError:
+        pass
+  return default
+
+
+def spawn_role(role: str, port_env: str, model_env: str, default_port: int, enable_trace: bool | None = None) -> Process:
+  port = resolve_int(port_env, "PORT", default=default_port)
+  model_id = (
+    os.environ.get(model_env)
+    or os.environ.get("MODEL_ID")
+    or "Qwen/Qwen3-0.6B"
+  )
+  temperature = resolve_float(f"{role.upper()}_TEMP", "TEMP", default=0.2)
+  max_tokens = resolve_int(f"{role.upper()}_MAX_NEW", "MAX_NEW", default=1024)
+  if enable_trace is None:
+    enable_trace = should_trace_queries()
+
+  proc = Process(
+    target=run_server,
+    name=f"{role}-server",
+    args=(role, port, model_id),
+    kwargs={
+      "temperature": temperature,
+      "max_tokens": max_tokens,
+      "enable_trace": enable_trace,
+    },
+    daemon=False,
+  )
+  proc.start()
+  trace_state = "on" if enable_trace else "off"
+  print(
+    f"[AI-Main] launched {role} -> port {port}, model {model_id}, "
+    f"temperature={temperature}, max_tokens={max_tokens}, trace={trace_state}"
+  )
+  return proc
+
+
+def should_enable_editor() -> bool:
+  flag = os.environ.get("EDITOR_ENABLED")
+  if flag is None:
+    return True
+  return flag.lower() not in {"0", "false", "off", "no"}
+
+
+def main():
+  procs: Dict[str, Process] = {}
+
+  def shutdown(_signum=None, _frame=None):
+    print("[AI-Main] shutting down...")
+    for role, proc in procs.items():
+      if proc.is_alive():
+        print(f"[AI-Main] terminating {role} (pid={proc.pid})")
+        proc.terminate()
+    for role, proc in procs.items():
+      proc.join(timeout=5)
+      if proc.is_alive():
+        print(f"[AI-Main] {role} did not exit gracefully; killing.")
+        proc.kill()
+    sys.exit(0)
+
+  signal.signal(signal.SIGINT, shutdown)
+  signal.signal(signal.SIGTERM, shutdown)
+
+  try:
+    trace_enabled = should_trace_queries()
+    trace_state = "enabled" if trace_enabled else "disabled"
+    print(f"[AI-Main] query tracing is {trace_state}. Set AI_TRACE_LOGS=0 to disable.")
+    for role, port_env, model_env, default_port in ROLE_CONFIG:
+      procs[role] = spawn_role(role, port_env, model_env, default_port, enable_trace=trace_enabled)
+
+    if should_enable_editor():
+      port = resolve_int("EDITOR_PORT", default=8008)
+      model_id = os.environ.get("EDITOR_MODEL_ID") or (
+        os.environ.get("MODEL_ID") or "Qwen/Qwen3-0.6B"
+      )
+      temperature = resolve_float("EDITOR_TEMP", "TEMP", default=0.2)
+      max_tokens = resolve_int("EDITOR_MAX_NEW", "MAX_NEW", default=512)
+      proc = Process(
+        target=run_server,
+        name="editor-server",
+        args=("editor", port, model_id),
+        kwargs={
+          "temperature": temperature,
+          "max_tokens": max_tokens,
+          "enable_trace": trace_enabled,
+        },
+        daemon=False,
+      )
+      proc.start()
+      procs["editor"] = proc
+      trace_state_editor = "on" if trace_enabled else "off"
+      print(
+        f"[AI-Main] launched editor -> port {port}, model {model_id}, "
+        f"temperature={temperature}, max_tokens={max_tokens}, trace={trace_state_editor}"
+      )
+
+    for proc in procs.values():
+      proc.join()
+  except KeyboardInterrupt:
+    shutdown()
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT","8008")))
+  main()

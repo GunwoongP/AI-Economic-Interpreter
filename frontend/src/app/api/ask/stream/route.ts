@@ -1,57 +1,78 @@
-import { NextRequest } from 'next/server';
-import { mockAsk } from '../mock';
+import { NextRequest, NextResponse } from 'next/server';
 
-const encoder = new TextEncoder();
+const BACKEND_BASE =
+  process.env.BACKEND_API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE ??
+  'http://127.0.0.1:3001';
 
-function send(controller: ReadableStreamDefaultController<Uint8Array>, event: unknown) {
-  controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+function resolveBackend(path: string) {
+  return `${BACKEND_BASE.replace(/\/+$/, '')}${path}`;
+}
+
+function clientClosedResponse() {
+  return new NextResponse(null, { status: 499, statusText: 'Client Closed Request' });
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const q = String(body?.q ?? '');
-  const payload = mockAsk(q);
-  const started = Date.now();
+  if (req.signal.aborted) {
+    return clientClosedResponse();
+  }
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      send(controller, { type: 'start', data: { ts: started } });
+  try {
+    const payload = await req.text();
+    const upstream = resolveBackend('/ask/stream');
 
-      const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const upstreamRes = await fetch(upstream, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      cache: 'no-store',
+      signal: req.signal,
+    });
 
-      if (req.signal?.aborted) {
-        controller.close();
-        return;
-      }
-      await delay(120);
+    if (!upstreamRes.ok) {
+      const detail = await upstreamRes.text().catch(() => '');
+      return NextResponse.json(
+        {
+          error: 'ask_stream_failed',
+          detail: detail || `upstream responded with HTTP ${upstreamRes.status}`,
+        },
+        { status: upstreamRes.status },
+      );
+    }
 
-      const completed = Date.now();
-      payload.metrics = {
-        ...payload.metrics,
-        ttft_ms: payload.metrics?.ttft_ms ?? completed - started,
-      };
-      payload.meta = {
-        ...payload.meta,
-        stamp: [new Date(started).toISOString(), new Date(completed).toISOString()],
-      };
+    if (!upstreamRes.body) {
+      return NextResponse.json(
+        {
+          error: 'ask_stream_failed',
+          detail: 'upstream response did not include a body',
+        },
+        { status: 502 },
+      );
+    }
 
-      if (payload.metrics) {
-        send(controller, { type: 'metrics', data: payload.metrics });
-      }
+    const headers = new Headers();
+    headers.set(
+      'Content-Type',
+      upstreamRes.headers.get('content-type') || 'application/x-ndjson; charset=utf-8',
+    );
+    headers.set('Cache-Control', 'no-store');
 
-      await delay(60);
-      send(controller, { type: 'complete', data: payload });
-      controller.close();
-    },
-    cancel() {
-      // nothing to clean up in mock mode
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'application/x-ndjson; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  });
+    return new Response(upstreamRes.body, {
+      status: upstreamRes.status,
+      headers,
+    });
+  } catch (error) {
+    if (req.signal.aborted || `${error}`.includes('BodyStreamBuffer was aborted')) {
+      return clientClosedResponse();
+    }
+    console.error('[ask stream proxy] error', error);
+    return NextResponse.json(
+      {
+        error: 'ask_stream_failed',
+        detail: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 },
+    );
+  }
 }

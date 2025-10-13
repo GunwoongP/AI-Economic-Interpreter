@@ -1,5 +1,5 @@
 // src/lib/api.ts
-import type { AskInput, AskOutput, Mode, Role, SeriesResp } from './types';
+import type { AskInput, AskOutput, DailyInsight, Mode, Role, SeriesResp } from './types';
 
 const BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, ''); // ← 끝 슬래시 제거
 
@@ -29,6 +29,15 @@ export function postAsk(body: AskInput): Promise<AskOutput> {
 export function getSeries(symbol: SeriesResp['symbol']) {
   const url = apiUrl(`/timeseries?symbol=${symbol}`);
   return jfetch<SeriesResp>(url);
+}
+
+export function getDailyInsight(params?: { q?: string; limit?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set('q', params.q);
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const suffix = qs.toString();
+  const url = apiUrl(`/insight/daily${suffix ? `?${suffix}` : ''}`);
+  return jfetch<DailyInsight>(url, { method: 'GET', headers: {} });
 }
 
 export type AskStreamEvent =

@@ -4,6 +4,7 @@ import cors from 'cors';
 import askRoute from './routes/ask.js';
 import timeseriesRoute from './routes/timeseries.js';
 import healthRoute from './routes/health.js';
+import insightRoute from './routes/insight.js';
 
 const app = express();
 app.use(cors());
@@ -12,6 +13,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/ask', askRoute);
 app.use('/timeseries', timeseriesRoute);
 app.use('/health', healthRoute);
+app.use('/insight', insightRoute);
 
 app.get('/', (_req, res)=> res.send('AI 경제해석관 Backend v1'));
 

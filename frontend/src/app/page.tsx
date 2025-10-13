@@ -304,7 +304,8 @@ export default function Page() {
 
             <div className="space-y-5">
               {conversation.length > 0 ? (
-                conversation.map((turn, idx) => {
+                [...conversation].reverse().map((turn, idx) => {
+                  const displayNumber = conversation.length - idx;
                   const groups = ROLE_ORDER.map((role) => ({
                     role,
                     cards: (turn.answer.cards || []).filter((card) => card.type === role),
@@ -317,7 +318,7 @@ export default function Page() {
                     >
                       <header className="space-y-2">
                         <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted">
-                          <span>질문 {idx + 1}</span>
+                          <span>질문 {displayNumber}</span>
                           <span>·</span>
                           <span>{new Date(turn.askedAt).toLocaleString()}</span>
                         </div>
