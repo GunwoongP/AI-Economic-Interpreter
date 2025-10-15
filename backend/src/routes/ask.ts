@@ -65,11 +65,35 @@ function selectRoles(q: string, prefer: Role[] = []): AskRole[] {
   if (/(per|roe|재무|실적|기업|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) buffer.push('firm');
   if (/(가계|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지)/.test(s)) buffer.push('house');
 
-  const sanitized = sanitizeSequence(buffer);
-  if (!sanitized.length) {
-    sanitized.push('eco');
+  let roles = sanitizeSequence(buffer);
+  if (!roles.length) {
+    roles = ['eco', 'firm', 'house'];
   }
-  return enforceAllowed(sanitized);
+  if (!roles.includes('eco')) {
+    roles = ['eco', ...roles];
+  }
+  if (roles.length === 1) {
+    const single = roles[0];
+    if (single === 'eco') {
+      const addFirm = /(기업|실적|주가|산업|시장|투자|제조|수출|ai|반도체|it)/i.test(s);
+      const addHouse = /(가계|포트폴리오|대출|부채|소비|투자전략|리스크|생활비)/.test(s);
+      roles = ['eco'];
+      if (addFirm) roles.push('firm');
+      if (addHouse) roles.push('house');
+      if (roles.length === 1) {
+        roles.push('firm', 'house');
+      }
+    } else if (single === 'firm') {
+      roles = ['eco', 'firm'];
+      if (/(가계|포트폴리오|소비|대출|리스크)/.test(s)) {
+        roles.push('house');
+      }
+    } else if (single === 'house') {
+      roles = ['eco', 'house', 'firm'];
+    }
+  }
+  const ordered = ROLE_ORDER.filter((role) => roles.includes(role));
+  return enforceAllowed(ordered.length ? ordered : ['eco', 'firm', 'house']);
 }
 
 // ✅ 자동/병렬/순차 모드 선택
@@ -155,21 +179,54 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
 
   const t0 = Date.now();
 
-  const evid = await searchRAG(q, generationRoles as any);
-  const ecoEv   = evid.filter(h => h.ns === 'macro');
-  const firmEv  = evid.filter(h => h.ns === 'firm');
-  const houseEv = evid.filter(h => h.ns === 'household');
-
   const draftMap = new Map<AskRole, Card>();
+  const usedNormalized = new Set<string>();
+  const usedFingerprints = new Set<string>();
+  const normalizeContent = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const fingerprintContent = (text: string) => {
+    const normalized = normalizeContent(text);
+    return normalized ? normalized.slice(0, 200) : '';
+  };
+  const hasCitation = (text: string) => /\(근거\d+\s*\|/.test(text);
+  const buildRoleQuery = (role: AskRole, base: string, previous: Card[]): string => {
+    let query = base.trim();
+    if (previous.length) {
+      const prevSummary = previous
+        .map((card) => `${card.title} ${card.content}`.replace(/\s+/g, ' ').slice(0, 300))
+        .join(' ');
+      if (prevSummary) {
+        query = `${query} ${prevSummary}`.trim();
+      }
+    }
+    if (role === 'firm') {
+      query = `${query} 수혜 업종 기업 실적 전망 투자`;
+    } else if (role === 'house') {
+      query = `${query} 가계 투자전략 포트폴리오 위험 관리`;
+    }
+    return query.slice(0, 2000);
+  };
+  const fetchEvidence = async (role: AskRole, query: string, fallback: string) => {
+    try {
+      const hits = await searchRAG(query, [role] as any);
+      if (hits.length) return hits;
+    } catch (err) {
+      console.error(`[ASK][RAG][${role}]`, err);
+    }
+    if (query !== fallback) {
+      try {
+        const hits = await searchRAG(fallback, [role] as any);
+        if (hits.length) return hits;
+      } catch (err) {
+        console.error(`[ASK][RAG][${role}][fallback]`, err);
+      }
+    }
+    return [];
+  };
+
   await attachAdapters(roles);
 
   try {
     const runRole = async (role: AskRole, index: number) => {
-      const ev =
-        role === 'eco' ? ecoEv :
-        role === 'firm' ? firmEv :
-        houseEv;
-
       const previous =
         mode === 'sequential'
           ? generationRoles
@@ -178,10 +235,97 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
               .filter(Boolean) as Card[]
           : [];
 
-      const draft = await genDraft(role, q, ev, { previous });
-      draftMap.set(role, draft);
+      const roleQuery = buildRoleQuery(role, q, previous);
+      let ev = await fetchEvidence(role, roleQuery, q);
+      if (!ev.length && generationRoles.length === 1) {
+        ev = await fetchEvidence(role, q, q);
+      }
+
+      const existingNormalized = new Set(usedNormalized);
+      const existingFingerprints = new Set(usedFingerprints);
+      const attemptTemps = [0.2, 0.45, 0.7, 0.9];
+      let selected: Card | null = null;
+      let normalized = '';
+      let fingerprint = '';
+      for (const temp of attemptTemps) {
+        const candidate = await genDraft(role, q, ev, { previous, temperature: temp });
+        const candidateNormalized = normalizeContent(candidate.content);
+        const candidateFingerprint = fingerprintContent(candidate.content);
+        const hasMinLength = candidateNormalized.length >= 80;
+        const hasRef = hasCitation(candidate.content);
+        selected = candidate;
+        normalized = candidateNormalized;
+        fingerprint = candidateFingerprint;
+        if (!hasMinLength) {
+          continue;
+        }
+        if (existingNormalized.has(candidateNormalized)) {
+          continue;
+        }
+        if (candidateFingerprint && existingFingerprints.has(candidateFingerprint)) {
+          continue;
+        }
+        if (!hasRef && ev.length) {
+          continue;
+        }
+        break;
+      }
+
+      const finalDraft = selected ?? (await genDraft(role, q, ev, { previous, temperature: 0.7 }));
+      normalized = normalizeContent(finalDraft.content) || normalized;
+      fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
+      let duplicateDetected = normalized ? existingNormalized.has(normalized) : false;
+      if (!duplicateDetected && fingerprint) {
+        duplicateDetected = existingFingerprints.has(fingerprint);
+      }
+
+      if (!hasCitation(finalDraft.content) && ev.length) {
+        const top = ev[0];
+        const ref = `(근거1 | ${top.meta?.date ?? 'N/A'} | ${top.meta?.source ?? top.meta?.title ?? '출처 없음'})`;
+        const lines = finalDraft.content.split('\n');
+        let injected = false;
+        const next = lines.map((line) => {
+          const trimmed = line.trim();
+          if (!injected && trimmed && /(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|^-)/.test(trimmed) && !hasCitation(line)) {
+            injected = true;
+            return `${line} ${ref}`.trim();
+          }
+          return line;
+        });
+        if (injected) {
+          finalDraft.content = next.join('\n');
+          normalized = normalizeContent(finalDraft.content);
+          fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
+          duplicateDetected = normalized ? existingNormalized.has(normalized) : duplicateDetected;
+          if (!duplicateDetected && fingerprint) {
+            duplicateDetected = existingFingerprints.has(fingerprint);
+          }
+        }
+      }
+
+      if (duplicateDetected && ev.length) {
+        const top = ev[0];
+        const ref = `(근거F | ${top.meta?.date ?? 'N/A'} | ${top.meta?.source ?? top.meta?.title ?? '출처 없음'})`;
+        const roleTag =
+          role === 'firm'
+            ? '기업 관점'
+            : role === 'house'
+            ? '가계 관점'
+            : '거시 관점';
+        finalDraft.content = `${finalDraft.content}\n- ${roleTag} 추가 인사이트: ${top.meta?.title ?? 'RAG 요약'} ${ref}`.trim();
+        normalized = normalizeContent(finalDraft.content);
+        fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
+      }
+
+      if (normalized) {
+        usedNormalized.add(normalized);
+      }
+      if (fingerprint) {
+        usedFingerprints.add(fingerprint);
+      }
+      draftMap.set(role, finalDraft);
       if (options?.onDraft) {
-        await options.onDraft(draft);
+        await options.onDraft(finalDraft);
       }
     };
 
@@ -204,7 +348,7 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
     .filter((role) => draftMap.has(role))
     .map((role) => draftMap.get(role)!);
 
-  const final = await genEditor({ query: q, drafts, mode });
+  const final = await genEditor({ query: q, drafts, mode, roles: generationRoles });
   const ttft   = Date.now() - t0;
 
   const roleBases = getRoleBases();

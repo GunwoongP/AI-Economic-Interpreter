@@ -4,7 +4,10 @@ from typing import List, Optional
 import os
 import io
 import json
-from PyPDF2 import PdfReader
+try:
+    from PyPDF2 import PdfReader  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    PdfReader = None  # type: ignore
 
 
 def _read_txt(path: str) -> str:
@@ -18,6 +21,8 @@ def _read_md(path: str) -> str:
 
 def _read_pdf(path: str) -> str:
     out = []
+    if PdfReader is None:
+        return ""
     with open(path, "rb") as fh:
         reader = PdfReader(fh)
         for page in reader.pages:
@@ -90,6 +95,8 @@ def read_filelike_texts(raw: bytes, filename: Optional[str] = None) -> List[str]
         return [raw.decode("utf-8", errors="ignore")]
     if name.endswith(".pdf"):
         out = []
+        if PdfReader is None:
+            return [""]
         reader = PdfReader(io.BytesIO(raw))
         for page in reader.pages:
             try:

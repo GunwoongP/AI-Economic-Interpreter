@@ -164,6 +164,49 @@ def _load_records(path: str) -> List[Dict[str, Any]]:
                 records.append(_record(text, base, meta))
         return records
 
+    if base_lower.endswith(".jsonl"):
+        records = []
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            for idx, line in enumerate(fh):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+
+                text = ""
+                for key in ("text", "content", "summary", "body", "description"):
+                    value = obj.get(key)
+                    if isinstance(value, str) and value.strip():
+                        text = value.strip()
+                        break
+                if not text:
+                    continue
+
+                meta = {
+                    "dataset": "jsonl_generic",
+                    "source_file": base,
+                    "index": idx,
+                }
+                if "title" in obj and isinstance(obj["title"], str):
+                    meta["title"] = obj["title"].strip()
+                if "source" in obj and isinstance(obj["source"], str):
+                    meta["source"] = obj["source"].strip()
+                if "page" in obj:
+                    meta["page"] = obj["page"]
+                if "chunk_id" in obj:
+                    meta["chunk_id"] = obj["chunk_id"]
+                if "tags" in obj and isinstance(obj["tags"], list):
+                    meta["tags"] = obj["tags"]
+
+                records.append(_record(text, base, meta))
+        if records:
+            return records
+
     fallback_text = read_text_from_file(path)
     if not fallback_text:
         return []

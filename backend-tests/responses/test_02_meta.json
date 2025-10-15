@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "question": "삼성전자 실적 전망 설명해줘",
+  "response_file": "/tmp/backend-tests/test_02.json"
+}

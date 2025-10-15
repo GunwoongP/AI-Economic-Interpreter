@@ -8,14 +8,25 @@ export function draftPrompt(role: 'eco'|'firm'|'house', q: string, evid: string[
   const prior = Array.isArray(previousCards) && previousCards.length
     ? `\n\n이전 단계 결과:\n${previousCards.map((card,i)=>`[${card.type.toUpperCase()} ${i+1}] ${card.title}\n${card.content}`.slice(0, 1000)).join('\n\n')}`
     : '';
+  const roleSpecific =
+    role === 'firm'
+      ? '\n- eco 카드에서 언급된 거시 변수와 RAG 근거를 연결해 수혜 업종/기업 2~3곳을 이름과 수치로 제시한다.'
+      : role === 'house'
+      ? '\n- 앞선 카드의 시장·기업 분석을 바탕으로 가계 포트폴리오 조정 아이디어 2가지 이상을 제시한다.'
+      : '\n- 최신 거시 지표와 정책 신호를 결론과 연결한다.';
   return [
     { role:'system', content:
 `너는 ${roleName}이다.
-- 과장 금지, 숫자/단위 명시, 투자권유 금지.
+- 과장 금지, 숫자/단위 명시(최소 2개 이상), 투자권유 금지.
 - 6문장 이내 핵심 서술 + 불릿 2~3개.
+- 각 번호는 서로 다른 사실을 담아야 하며 중복/순환 논리를 금지한다.
+- 모든 번호/불릿 문장 끝에는 해당 근거를 괄호로 표시한다. 형식: (근거1 | 2024-05-02 | 한국은행). 날짜가 없으면 N/A를 사용한다.
+- 근거 라벨은 "근거1~"과 매칭되도록 사용하고, 최소 1개는 최근 5년 이내 자료를 인용한다. 최신 근거가 없으면 (근거N | N/A | 최신 근거 부족)으로 명시한다.
 - 마크다운으로 제목·본문·리스트를 구성하고 리스트는 "-"로 시작한다.
 - 출력은 100% 한국어로 작성하고, 영어 설명이나 내부 추론(<think>, Thought 등)은 노출하지 않는다.
 - "제목:" 같은 라벨 없이 제목 한 줄과 본문을 제공한다.
+- 안내 문구(예: 모순/중복 제거, 반증 등)는 결과에 포함하지 않는다.
+${roleSpecific}
 - 구조를 반드시 따르라: ${
       role === 'eco'
         ? '① 개념 요약 → ② 경제 원리(금리/환율/정책 연결) → ③ 단기·장기 영향 → ④ 역사 사례(연도·사건명) → ⑤ 1문장 요약'
@@ -33,15 +44,22 @@ ${evidence}${prior}
   ];
 }
 
-export function editorPrompt(q: string, drafts: string[], mode: 'parallel'|'sequential'): ChatMsg[] {
+export function editorPrompt(q: string, drafts: string[], mode: 'parallel'|'sequential', roles: Role[]): ChatMsg[] {
   const joined = drafts.map((d,i)=>`[초안${i+1}]\n${d}`).join('\n\n');
   const modeDesc = mode === 'sequential' ? '순차(앞선 카드 내용을 다음 카드가 참조)' : '병렬(각 카드 독립 생성)';
+  const roleLabels: Record<Role, string> = { eco: 'ECO', firm: 'FIRM', house: 'HOUSE', combined: 'COMBINED' };
+  const roleLine = roles.length ? roles.map((r) => roleLabels[r] ?? r.toUpperCase()).join(', ') : 'ECO';
   return [
     { role:'system', content:
 `너는 최종 편집자다. 초안들을 통합해 "통합 해석" 카드(3~6문장)와
-보조 카드 1~2개를 만들어라. 모순/중복 제거, 반증/리스크 1줄 포함.
+보조 카드 1~2개를 만들어라. 모순/중복 제거, 반증/리스크 1줄은 "⚠️ 리스크:" 형식으로 마지막에 포함한다.
+역할별 고유 인사이트가 유지되도록 동일 문장을 반복하면 안 된다.
+모든 주장에는 최소 1개의 근거 괄호 표기를 포함해야 한다.
 투자권유 금지, 교육 목적 문구는 백엔드가 삽입한다.
-현재 생성 모드는 ${modeDesc}이다.` },
+현재 생성 모드는 ${modeDesc}이다.
+- 순차 모드에서는 앞선 전문가 카드의 핵심을 이어받아 마지막 결론 카드에 종합 관점을 제시한다.
+- 출력 마지막 줄에는 "<참여 전문가> ${roleLine}" 문구를 추가한다.
+- 필요하면 최대 8문장까지 확장해도 좋다.` },
     { role:'user', content:
 `질문: ${q}
 
@@ -50,7 +68,7 @@ ${joined}
 
 요구사항:
 - 제목 + 본문 형태
-- 카드 최대 3개 (통합 1 + 보조 1~2)
+- 카드 최대 3개 (통합 1 + 보조 1~2, 내용이 없으면 해당 보조 카드를 생략)
 - 한국어로 간결하게.
 - 마크다운 문법으로 작성하고 각 카드 본문은 문단과 불릿을 조화롭게 사용.
 - 영어 해설이나 내부 추론(<think> 등)은 출력하지 않는다.` }
@@ -129,6 +147,37 @@ ${context}
 ${newsLines || '- (뉴스 없음)'}
 
 JSON을 반환해라.`
+    }
+  ];
+}
+
+
+export function marketSummaryPrompt(params: {
+  focus: string;
+  kospi: { trend: string; summary: string; changeText: string };
+  ixic: { trend: string; summary: string; changeText: string };
+  headlines: string[];
+}): ChatMsg[] {
+  const newsBlock = params.headlines.slice(0, 5).map((line, idx) => `- [${idx + 1}] ${line}`).join('\n');
+  return [
+    {
+      role: 'system',
+      content: `너는 증시 해석 전문가다.
+- 코스피와 나스닥의 등락 원인을 시계열 데이터와 뉴스 요약을 바탕으로 4~6문장 사이의 한국어 단락으로 설명한다.
+- 두 지수의 변동 폭(포인트·%)과 수급/정책 요인을 명확히 언급하고, 문장마다 근거 번호([1], [2]) 또는 지표를 붙인다.
+- 첫 문장은 전체 테마를 요약하고, 이후 문장에서는 '이렇고 그래서 ...' 구조로 원인과 결과를 연결한다.
+- 마지막 문장은 향후 관찰 포인트를 제시한다.
+- 불필요한 마크다운이나 목록 없이 자연어 문장만 출력한다.`
+    },
+    {
+      role: 'user',
+      content: `질문 주제: ${params.focus}
+코스피 흐름: ${params.kospi.trend} (${params.kospi.changeText})
+코스피 요약: ${params.kospi.summary}
+나스닥 흐름: ${params.ixic.trend} (${params.ixic.changeText})
+나스닥 요약: ${params.ixic.summary}
+관련 뉴스:
+${newsBlock || '- (뉴스 없음)'}`
     }
   ];
 }

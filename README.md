@@ -158,19 +158,20 @@ npm run dev
 
 ### 6. LoRA 어댑터 활용 (역할별 분석 강화)
 
-- 디렉터리: `ai/eco/lora/`, `ai/firm/lora/`, `ai/house/lora/`
-- 각 역할별 LoRA 어댑터 디렉터리에 `adapter_config.json`이 포함된 하위폴더(예: `final/`) 자동 탐색
-- 환경 변수로 경로 재정의 가능
+- RBLN 모델과 어댑터를 한 번에 내보내려면:
 
 ```bash
-export ECO_LORA_PATH=/path/to/eco_adapter
-export FIRM_LORA_PATH=/path/to/firm_adapter
-export HOUSE_LORA_PATH=/path/to/house_adapter
-# 공통경로: export LORA_PATH=/shared/lora
+python ai/compile_rbln_model.py Qwen/Qwen3-0.6B \
+  --max-seq-len 8192 \
+  --lora eco=ai/eco/lora/qwen3_0p6b_lora_eco/final \
+  --lora firm=ai/firm/lora/qwen3_0p6b_lora_firm/final \
+  --lora house=ai/house/lora/qwen3_0p6b_lora_house/final
 ```
 
-- 서버 기동 시 콘솔에 `lora=/...` 로그 출력 → 정상 장착
-- 사용 중지: 환경 변수 비우고 어댑터 파일 제거
+- 기본 출력: `ai/models/Qwen3-0.6B` (베이스 모델) + `ai/models/Qwen3-0.6B-eco|firm|house` (LoRA 병합본)
+- `run.sh`는 위 디렉터리를 자동 감지하여 `ECO_MODEL_ID`, `FIRM_MODEL_ID`, `HOUSE_MODEL_ID` 환경변수로 전달합니다.
+- RBLN SDK가 아직 LoRA 핫스왑 API를 제공하지 않아, 현재는 역할별 프로세스에 병합된 모델을 주입하는 방식으로 동작합니다.
+- 어댑터 경로만 바꾸면 재컴파일로 손쉽게 교체할 수 있습니다 (`--force`로 덮어쓰기).
 
 ### 7. Docker Compose
 

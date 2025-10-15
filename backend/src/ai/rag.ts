@@ -17,18 +17,46 @@ export type Hit = {
 };
 
 type RoleKey = 'eco' | 'firm' | 'house';
+const ROLE_KEYS: RoleKey[] = ['eco', 'firm', 'house'];
 
 interface RawDoc {
+  id?: string;
+  role?: string;
+  title?: string;
+  summary?: string;
+  content?: string;
+  text?: string;
+  body?: string;
+  description?: string;
+  heading?: string;
+  headline?: string;
+  chapter?: string;
+  section_title?: string;
+  date?: string;
+  published_at?: string;
+  source?: string;
+  origin?: string;
+  publisher?: string;
+  originallink?: string;
+  tags?: string[] | string;
+  keywords?: string[] | string;
+  categories?: string[] | string;
+  chunk_id?: number | string;
+  page?: number | string;
+  [extra: string]: unknown;
+}
+
+interface NormalizedDoc {
   id: string;
   role: RoleKey;
   title: string;
   summary: string;
   date?: string;
   source?: string;
-  tags?: string[];
+  tags: string[];
 }
 
-interface LoadedDoc extends RawDoc {
+interface LoadedDoc extends NormalizedDoc {
   tokens: Set<string>;
   tagTokens: Set<string>;
 }
@@ -39,6 +67,12 @@ const ROLE_TO_NS: Record<RoleKey, NS> = {
   eco: 'macro',
   firm: 'firm',
   house: 'household',
+};
+
+const ROLE_FALLBACK_TITLE: Record<RoleKey, string> = {
+  eco: 'Macro reference',
+  firm: 'Firm reference',
+  house: 'Household reference',
 };
 
 const STOPWORDS = new Set([
@@ -74,6 +108,75 @@ const STOPWORDS = new Set([
   '필요하다',
 ]);
 
+function pickFirstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function coerceTags(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item).trim() : ''))
+      .filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[,;|]/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+  return [];
+}
+
+function normalizeRawDoc(raw: RawDoc, fallbackRole: RoleKey, index: number): NormalizedDoc | null {
+  const resolvedRole =
+    typeof raw.role === 'string' && ROLE_KEYS.includes(raw.role as RoleKey)
+      ? (raw.role as RoleKey)
+      : fallbackRole;
+
+  const summary =
+    pickFirstString(raw.summary, raw.content, raw.text, raw.body, raw.description) ?? '';
+  if (!summary) {
+    console.warn(`[RAG] skipped ${resolvedRole} doc at line ${index + 1}: missing summary/content`);
+    return null;
+  }
+
+  const sourceText = pickFirstString(raw.source, raw.origin, raw.publisher);
+  const pageText =
+    typeof raw.page === 'number' || typeof raw.page === 'string'
+      ? String(raw.page).trim()
+      : undefined;
+
+  const title =
+    pickFirstString(raw.title, raw.heading, raw.headline, raw.chapter, raw.section_title) ??
+    (sourceText ? `${sourceText}${pageText ? ` p.${pageText}` : ''}` : `${ROLE_FALLBACK_TITLE[resolvedRole]} ${index + 1}`);
+
+  const id =
+    pickFirstString(raw.id, typeof raw.chunk_id === 'number' || typeof raw.chunk_id === 'string' ? String(raw.chunk_id) : undefined) ??
+    `${resolvedRole}_${index + 1}`;
+
+  const date = pickFirstString(raw.date, raw.published_at);
+  const tags = coerceTags(raw.tags ?? raw.keywords ?? raw.categories);
+
+  return {
+    id,
+    role: resolvedRole,
+    title,
+    summary,
+    date,
+    source: sourceText,
+    tags,
+  };
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLocaleLowerCase('ko-KR')
@@ -91,12 +194,20 @@ function loadDocs(role: RoleKey): LoadedDoc[] {
   }
   const raw = fs.readFileSync(filePath, 'utf-8');
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return lines.map((line) => {
-    const doc = JSON.parse(line) as RawDoc;
-    const tokens = new Set(tokenize(`${doc.title} ${doc.summary} ${(doc.tags ?? []).join(' ')}`));
-    const tagTokens = new Set((doc.tags ?? []).flatMap((tag) => tokenize(tag)));
-    return { ...doc, tokens, tagTokens } satisfies LoadedDoc;
+  const docs: LoadedDoc[] = [];
+  lines.forEach((line, index) => {
+    try {
+      const parsed = JSON.parse(line) as RawDoc;
+      const normalized = normalizeRawDoc(parsed, role, index);
+      if (!normalized) return;
+      const tokens = new Set(tokenize(`${normalized.title} ${normalized.summary} ${normalized.tags.join(' ')}`));
+      const tagTokens = new Set(normalized.tags.flatMap((tag) => tokenize(tag)));
+      docs.push({ ...normalized, tokens, tagTokens });
+    } catch (err) {
+      console.warn(`[RAG] invalid JSON in ${role} dataset (line ${index + 1}):`, err);
+    }
   });
+  return docs;
 }
 
 const DOCS: Record<RoleKey, LoadedDoc[]> = {

@@ -2,20 +2,24 @@ import type { Role } from '../types.js';
 
 export type ChatMsg = { role: 'system' | 'user' | 'assistant'; content: string };
 
-type Target = Role | 'editor' | 'planner' | 'router';
+type Target = Role | 'editor' | 'planner' | 'router' | 'market';
 
-const FALLBACK_BASE =
+const BASE_HINT =
   process.env.LOCAL_AI_BASE ||
   process.env.AI_BASE_URL ||
-  'http://localhost:8008';
+  '';
 
-const ROLE_BASE: Record<'eco' | 'firm' | 'house' | 'editor' | 'planner' | 'router', string> = {
-  eco: process.env.ECO_AI_BASE || FALLBACK_BASE,
-  firm: process.env.FIRM_AI_BASE || FALLBACK_BASE,
-  house: process.env.HOUSE_AI_BASE || FALLBACK_BASE,
-  editor: process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || FALLBACK_BASE,
-  planner: process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || FALLBACK_BASE,
-  router: process.env.ROUTER_AI_BASE || process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || FALLBACK_BASE,
+const fallbackBase = (port: number) =>
+  (BASE_HINT ? BASE_HINT : `http://localhost:${port}`).replace(/\/+$/, '');
+
+const ROLE_BASE: Record<'eco' | 'firm' | 'house' | 'editor' | 'planner' | 'router' | 'market', string> = {
+  eco: (process.env.ECO_AI_BASE || fallbackBase(8001)).replace(/\/+$/, ''),
+  firm: (process.env.FIRM_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8002)).replace(/\/+$/, ''),
+  house: (process.env.HOUSE_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8003)).replace(/\/+$/, ''),
+  editor: (process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8001)).replace(/\/+$/, ''),
+  planner: (process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8001)).replace(/\/+$/, ''),
+  router: (process.env.ROUTER_AI_BASE || process.env.PLANNER_AI_BASE || process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8001)).replace(/\/+$/, ''),
+  market: (process.env.MARKET_AI_BASE || process.env.EDITOR_AI_BASE || process.env.ECO_AI_BASE || fallbackBase(8001)).replace(/\/+$/, ''),
 };
 
 function baseFor(target: Target): string {
@@ -26,23 +30,34 @@ function baseFor(target: Target): string {
   return ROLE_BASE.editor;
 }
 
+type GenerateOpts = {
+  max_tokens?: number;
+  temperature?: number;
+  loraName?: string;
+};
+
 export async function localGenerate(
   target: Target,
   messages: ChatMsg[],
-  opts?: { max_tokens?: number; temperature?: number },
+  opts?: GenerateOpts,
 ) {
   const base = baseFor(target).replace(/\/+$/, '');
+  const payload: Record<string, unknown> = {
+    messages,
+    max_tokens: opts?.max_tokens ?? 512,
+    temperature: opts?.temperature ?? 0.2,
+  };
+  if (opts?.loraName) {
+    payload.lora_name = opts.loraName;
+  }
   const res = await fetch(`${base}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      max_tokens: opts?.max_tokens ?? 512,
-      temperature: opts?.temperature ?? 0.2,
-    }),
+    body: JSON.stringify(payload),
   });
   const preview = (messages.find((m) => m.role === 'user')?.content || '').slice(0, 60);
-  console.log(`[AI] ${target} -> ${base} ::`, preview);
+  const loraLabel = opts?.loraName ? ` lora=${opts.loraName}` : '';
+  console.log(`[AI] ${target} -> ${base}${loraLabel} ::`, preview);
   if (!res.ok) {
     throw new Error(`LOCAL AI HTTP ${res.status} (${target}@${base}): ${await res.text()}`);
   }

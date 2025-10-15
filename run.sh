@@ -1,46 +1,49 @@
 #!/usr/bin/env bash
+
+# Simplified service orchestrator for the Eco-Mentos stack.
+# Responsibilities:
+#   1. Start the market API, AI core, backend, and frontend.
+#   2. Stream logs to logs/<service>.log.
+#   3. Optionally verify the backend health endpoint and AI chat endpoint.
+
 set -euo pipefail
 
-# Root of the Eco-Mentos project (directory containing this script)
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Allow overriding the Python executable and service ports with env vars.
+LOG_DIR="${LOG_DIR:-$ROOT_DIR/logs}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+NODE_BIN="${NODE_BIN:-npm}"
+
 MARKET_API_HOST="${MARKET_API_HOST:-127.0.0.1}"
 MARKET_API_PORT="${MARKET_API_PORT:-8000}"
-# ai/main.py reads its own port configuration from environment; defaults cover development.
-AI_WORKDIR="${AI_WORKDIR:-$ROOT_DIR/ai}"
-BACKEND_WORKDIR="${BACKEND_WORKDIR:-$ROOT_DIR/backend}"
-FRONTEND_WORKDIR="${FRONTEND_WORKDIR:-$ROOT_DIR/frontend}"
-MARKET_API_WORKDIR="${MARKET_API_WORKDIR:-$ROOT_DIR/market_api}"
-LOG_DIR="${LOG_DIR:-$ROOT_DIR/logs}"
+MARKET_API_RELOAD="${MARKET_API_RELOAD:-1}"
+
+BACKEND_PORT="${BACKEND_PORT:-3001}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+
+# AI main.py launches multiple role-specific workers.
+AI_CHAT_URL="${AI_CHAT_URL:-http://127.0.0.1:8001/chat}"
+AI_VERIFY_PAYLOAD='{"messages":[{"role":"user","content":"ping"}]}'
+
+VERIFY_STARTUP="${VERIFY_STARTUP:-1}"
 
 mkdir -p "$LOG_DIR"
 
-declare -a PIDS=()
+declare -a SERVICE_PIDS=()
 declare -A PID_TO_NAME=()
 declare -A NAME_TO_LOG=()
 
-cleanup() {
-  local status=$?
-  trap - EXIT SIGINT SIGTERM
-  echo "[run.sh] shutting down (status=$status)..."
-  for pid in "${PIDS[@]}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      local name="${PID_TO_NAME[$pid]}"
-      echo "[run.sh] stopping ${name} (pid=$pid)"
-      kill "$pid" 2>/dev/null || true
-    fi
-  done
-  for pid in "${PIDS[@]}"; do
-    if wait "$pid" 2>/dev/null; then
-      continue
-    fi
-  done
-  echo "[run.sh] all services stopped."
-  exit "$status"
+log() {
+  local level="$1"; shift
+  printf '[run.sh] [%s] %s\n' "$level" "$*" >&2
 }
-trap cleanup EXIT SIGINT SIGTERM
+
+ensure_command() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    log "ERROR" "Missing required command: '$cmd'"
+    exit 1
+  fi
+}
 
 start_service() {
   local name="$1"
@@ -49,70 +52,108 @@ start_service() {
   local log_file="$LOG_DIR/${name}.log"
   NAME_TO_LOG["$name"]="$log_file"
   : > "$log_file"
-  echo "[run.sh] starting ${name} (log: ${log_file#$ROOT_DIR/})..."
+  log "INFO" "Starting ${name} (log → ${log_file#$ROOT_DIR/})"
   (
     cd "$workdir"
     exec "$@"
   ) > >(stdbuf -oL tee -a "$log_file") 2>&1 &
   local pid=$!
-  PIDS+=("$pid")
+  SERVICE_PIDS+=("$pid")
   PID_TO_NAME["$pid"]="$name"
-  echo "[run.sh] ${name} started (pid=$pid)"
+  log "INFO" "${name} started (pid=${pid})"
 }
 
-# --- Launch services -------------------------------------------------------
+cleanup() {
+  local status=$?
+  trap - EXIT SIGINT SIGTERM
+  log "INFO" "Shutting down services (status=${status})"
+  for pid in "${SERVICE_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      local name="${PID_TO_NAME[$pid]}"
+      log "INFO" "Stopping ${name} (pid=${pid})"
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in "${SERVICE_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  log "INFO" "All services stopped"
+  exit "$status"
+}
+trap cleanup EXIT SIGINT SIGTERM
 
-# 1. Market data API (FastAPI + uvicorn)
-MARKET_API_CMD=("$PYTHON_BIN" -m uvicorn app:app --host "$MARKET_API_HOST" --port "$MARKET_API_PORT")
-if [[ "${MARKET_API_RELOAD:-1}" != "0" ]]; then
-  MARKET_API_CMD+=(--reload)
+verify_backend() {
+  local url="http://127.0.0.1:${BACKEND_PORT}/health"
+  for attempt in {1..30}; do
+    if curl -fsS "$url" >/dev/null; then
+      log "INFO" "Backend health check succeeded (${url})"
+      return 0
+    fi
+    sleep 1
+  done
+  log "WARN" "Backend health check failed (${url}). Check ${NAME_TO_LOG[backend]}"
+  return 1
+}
+
+verify_ai_core() {
+  for attempt in {1..45}; do
+    if curl -fsS -H 'Content-Type: application/json' \
+      -d "$AI_VERIFY_PAYLOAD" \
+      "$AI_CHAT_URL" >/dev/null; then
+      log "INFO" "AI core responded (${AI_CHAT_URL})"
+      return 0
+    fi
+    sleep 2
+  done
+  log "WARN" "AI core did not respond (${AI_CHAT_URL}). Check ${NAME_TO_LOG[ai-core]}"
+  return 1
+}
+
+ensure_command "$PYTHON_BIN"
+ensure_command "$NODE_BIN"
+ensure_command curl
+
+# Service launch definitions -------------------------------------------------
+MARKET_API_CMD=(
+  "$PYTHON_BIN" -m uvicorn app:app
+  --host "$MARKET_API_HOST"
+  --port "$MARKET_API_PORT"
+)
+if [[ "$MARKET_API_RELOAD" != "0" ]]; then
+  MARKET_API_CMD+=("--reload")
 fi
-start_service "market-api" "$MARKET_API_WORKDIR" "${MARKET_API_CMD[@]}"
 
-# 2. AI Core (spins up eco/firm/house/[editor] workers)
-start_service "ai-core" "$AI_WORKDIR" "$PYTHON_BIN" main.py
+start_service "market-api" "$ROOT_DIR/market_api" "${MARKET_API_CMD[@]}"
 
-# 3. Backend (Express + TypeScript)
-start_service "backend" "$BACKEND_WORKDIR" npm run dev
+start_service "ai-core" "$ROOT_DIR/ai" \
+  "$PYTHON_BIN" main.py
 
-# 4. Frontend (Next.js)
-start_service "frontend" "$FRONTEND_WORKDIR" npm run dev
+start_service "backend" "$ROOT_DIR/backend" \
+  env PORT="$BACKEND_PORT" "$NODE_BIN" run dev
 
-echo "[run.sh] all services launched. Press Ctrl+C to stop."
+start_service "frontend" "$ROOT_DIR/frontend" \
+  env PORT="$FRONTEND_PORT" "$NODE_BIN" run dev
 
-set +e
+log "INFO" "All services launched. Press Ctrl+C to stop."
+
+if [[ "$VERIFY_STARTUP" == "1" ]]; then
+  if verify_backend && verify_ai_core; then
+    log "INFO" "Verification completed successfully."
+  else
+    log "WARN" "One or more verification steps failed."
+  fi
+fi
+
+# Wait for any child to exit, then let the trap handle cleanup.
 supports_wait_n=0
 if (( ${BASH_VERSINFO[0]:-0} > 4 || ( ${BASH_VERSINFO[0]:-0} == 4 && ${BASH_VERSINFO[1]:-0} >= 3 ) )); then
   supports_wait_n=1
 fi
 
 if (( supports_wait_n )); then
-  wait -n "${PIDS[@]}"
-  exit_code=$?
-  failed_pid=""
-  for pid in "${PIDS[@]}"; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      failed_pid="$pid"
-      break
-    fi
-  done
-  if [[ -n "$failed_pid" ]]; then
-    name="${PID_TO_NAME[$failed_pid]}"
-    log="${NAME_TO_LOG[$name]}"
-    echo "[run.sh] '${name}' exited (status=$exit_code). Check log: ${log#$ROOT_DIR/}"
-  else
-    echo "[run.sh] a service exited (status=$exit_code)."
-  fi
-  exit "$exit_code"
+  wait -n "${SERVICE_PIDS[@]}"
 else
-  for pid in "${PIDS[@]}"; do
+  for pid in "${SERVICE_PIDS[@]}"; do
     wait "$pid"
-    exit_code=$?
-    if (( exit_code != 0 )); then
-      name="${PID_TO_NAME[$pid]}"
-      log="${NAME_TO_LOG[$name]}"
-      echo "[run.sh] '${name}' exited (status=$exit_code). Check log: ${log#$ROOT_DIR/}"
-      exit "$exit_code"
-    fi
   done
 fi

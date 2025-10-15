@@ -1,16 +1,39 @@
 import type { Card, Role, SeriesResp } from '../types.js';
 import { localGenerate, ChatMsg } from './provider_local.js';
-import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt } from './prompts.js';
+import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt, marketSummaryPrompt } from './prompts.js';
 
-export async function attachAdapters(_roles: Role[]) {
+export type AskRole = 'eco' | 'firm' | 'house';
+
+const ROLE_LORA_NAMES: Record<AskRole, string> = {
+  eco: 'eco',
+  firm: 'firm',
+  house: 'house',
+};
+
+const ATTACHED_ROLES = new Set<AskRole>();
+
+export async function attachAdapters(roles: Role[]) {
+  ATTACHED_ROLES.clear();
+  roles.forEach((role) => {
+    if (role === 'eco' || role === 'firm' || role === 'house') {
+      ATTACHED_ROLES.add(role);
+    }
+  });
   return true;
 }
 export async function detachAll() {
+  ATTACHED_ROLES.clear();
   return true;
 }
 
+function resolveLoraName(role: Role): string | undefined {
+  if (role === 'eco' || role === 'firm' || role === 'house') {
+    return ROLE_LORA_NAMES[role];
+  }
+  return undefined;
+}
+
 type Evidence = { text: string; meta?: any; sim?: number };
-export type AskRole = 'eco' | 'firm' | 'house';
 export interface InsightSnippet {
   title: string;
   lines: string[];
@@ -51,16 +74,27 @@ function sanitizeGenerated(raw: string): string {
   if (!raw) return '';
   let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
   text = text.replace(/<\/?think>/gi, '');
+  text = text
+    .replace(/\(모순\/중복[^)]*\)/gi, '')
+    .replace(/모순\/중복[^)\n]*\)?/gi, '')
+    .replace(/반증\/리스크[^)\n]*\)?/gi, '')
+    .replace(/투자권유 금지[^)\n]*\)?/gi, '');
   text = text.replace(/^(?:[\*\-]\s*)?(?:Thought|Analysis|Reasoning|Plan)\s*:.*$/gim, '');
+  const seen = new Set<string>();
   text = text
     .split('\n')
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed) return '';
-      if (!/[가-힣]/.test(trimmed) && !/[\d]/.test(trimmed)) {
+      if (/모순\/중복|반증|투자권유 금지/i.test(trimmed)) return '';
+      const cleaned = trimmed.replace(/^제목:\s*/i, '');
+      if (!/[가-힣]/.test(cleaned) && !/[\d]/.test(cleaned)) {
         return '';
       }
-      return line;
+      const canonical = cleaned.replace(/\s+/g, ' ').toLowerCase();
+      if (seen.has(canonical)) return '';
+      seen.add(canonical);
+      return cleaned;
     })
     .filter(Boolean)
     .join('\n');
@@ -71,13 +105,14 @@ export async function genDraft(
   role: Role,
   q: string,
   evidences: Evidence[],
-  opts: { previous?: Card[] } = {},
+  opts: { previous?: Card[]; temperature?: number } = {},
 ): Promise<Card> {
   if (!['eco', 'firm', 'house'].includes(role)) {
     return { type: 'combined', title: '요약', content: 'N/A', conf: 0.5 };
   }
 
   const previousCards = opts.previous?.slice(-3);
+  const temperature = opts.temperature ?? 0.2;
 
   const msgs = draftPrompt(
     role as any,
@@ -87,7 +122,8 @@ export async function genDraft(
   ) as ChatMsg[];
   const { content } = await localGenerate(role, msgs, {
     max_tokens: 600,
-    temperature: 0.2,
+    temperature,
+    loraName: resolveLoraName(role),
   });
   const cleaned = sanitizeGenerated(content) || content;
 
@@ -113,14 +149,16 @@ export async function genEditor(params: {
   query: string;
   drafts: Card[];
   mode: 'parallel' | 'sequential';
+  roles: Role[];
 }) {
   const msgs = editorPrompt(
     params.query,
     params.drafts.map((d) => `${d.title}\n${d.content}`),
     params.mode,
+    params.roles,
   ) as ChatMsg[];
   const { content } = await localGenerate('editor', msgs, {
-    max_tokens: 900,
+    max_tokens: 1200,
     temperature: 0.2,
   });
   const cleaned = sanitizeGenerated(content) || content;
@@ -300,18 +338,39 @@ export async function genDailyInsight(params: {
 }): Promise<{ summary: string; insights: InsightBundle | null; raw: string }> {
   const kospiInfo = describeSeries(params.kospi);
   const ixicInfo = describeSeries(params.ixic);
-  const msgs = dailyInsightPrompt({
+  const structuredMsgs = dailyInsightPrompt({
     focus: params.focus,
     kospi: kospiInfo,
     ixic: ixicInfo,
     news: params.news,
   }) as ChatMsg[];
-  const response = await localGenerate('editor', msgs, { max_tokens: 420, temperature: 0.2 });
-  const raw = stripChainOfThought(response.raw?.content ?? response.content ?? '');
-  const summary = sanitizeGenerated(raw) || raw;
+  const structured = await localGenerate('editor', structuredMsgs, { max_tokens: 420, temperature: 0.2 });
+  const raw = stripChainOfThought(structured.raw?.content ?? structured.content ?? '');
   const parsedInsights = parseDailyInsightPayload(raw);
   const fallback = buildFallbackInsights('오늘의 해설', kospiInfo, ixicInfo, params.news);
   const insights = mergeInsights(parsedInsights, fallback);
+
+  const headlines = params.news
+    .map((item) => `${(item.title || '').trim()} :: ${(item.description || '').trim()}`.trim())
+    .filter((line) => line.replace(/::/g, '').trim().length > 0);
+  const marketMsgs = marketSummaryPrompt({
+    focus: params.focus,
+    kospi: {
+      trend: kospiInfo.trend,
+      summary: kospiInfo.summary,
+      changeText: formatChangeText(kospiInfo),
+    },
+    ixic: {
+      trend: ixicInfo.trend,
+      summary: ixicInfo.summary,
+      changeText: formatChangeText(ixicInfo),
+    },
+    headlines,
+  }) as ChatMsg[];
+  const narrative = await localGenerate('market', marketMsgs, { max_tokens: 420, temperature: 0.25 });
+  const summaryRaw = stripChainOfThought(narrative.raw?.content ?? narrative.content ?? '');
+  const summary = sanitizeGenerated(summaryRaw) || summaryRaw;
+
   return {
     raw,
     summary,
@@ -320,7 +379,45 @@ export async function genDailyInsight(params: {
 }
 
 function clampLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 80) {
+    return normalized;
+  }
+  const truncated = normalized.slice(0, 77);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const safe = lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated;
+  return `${safe.trim()}…`;
+}
+
+function ensureMarketSnippet(
+  market: '코스피' | '나스닥',
+  primarySnippet: InsightSnippet | null | undefined,
+  fallbackSnippet: InsightSnippet | null | undefined,
+): InsightSnippet | null {
+  if (!primarySnippet && !fallbackSnippet) {
+    return null;
+  }
+
+  const directionSource = primarySnippet?.title ?? fallbackSnippet?.title ?? '';
+  const directionMatch = directionSource.match(/(상승|하락|보합)/);
+  const direction = directionMatch?.[1] ?? '보합';
+
+  const stripMarketPrefix = (value: string | undefined) =>
+    (value ?? '').replace(/^(코스피|나스닥)\s*(상승|하락|보합)?\s*[·:\-]?\s*/i, '').trim();
+
+  const primaryBody = stripMarketPrefix(primarySnippet?.title);
+  const fallbackBody = stripMarketPrefix(fallbackSnippet?.title);
+  const titleBody = primaryBody || fallbackBody || '핵심 요약';
+
+  let lines = (primarySnippet?.lines ?? []).map((line) => clampLine(line)).filter(Boolean);
+  if (!lines.length) {
+    lines = (fallbackSnippet?.lines ?? []).map((line) => clampLine(line)).filter(Boolean);
+  }
+
+  return {
+    title: `${market} ${direction} · ${titleBody}`,
+    lines,
+  };
 }
 
 function formatChangeLine(info: SeriesSummaryInfo): string {
@@ -329,6 +426,12 @@ function formatChangeLine(info: SeriesSummaryInfo): string {
   return clampLine(
     `${info.trend}. 종가는 ${info.latest.toFixed(2)}p로 ${change} (${pct}%) 움직였습니다.`,
   );
+}
+
+function formatChangeText(info: SeriesSummaryInfo): string {
+  const change = info.change >= 0 ? `+${info.change.toFixed(2)}` : info.change.toFixed(2);
+  const pct = info.pct >= 0 ? `+${info.pct.toFixed(2)}` : info.pct.toFixed(2);
+  return `${change}p (${pct}%)`;
 }
 
 function formatNewsLine(
@@ -391,10 +494,14 @@ function mergeInsights(primary: InsightBundle | null, fallback: InsightBundle): 
   if (!primary) {
     return fallback;
   }
-  const merged: InsightBundle = {
-    label: primary.label || fallback.label,
-    kospi: primary.kospi && primary.kospi.lines?.length ? primary.kospi : fallback.kospi,
-    ixic: primary.ixic && primary.ixic.lines?.length ? primary.ixic : fallback.ixic,
+
+  const label = primary.label?.trim() || fallback.label;
+  const kospi = ensureMarketSnippet('코스피', primary.kospi, fallback.kospi);
+  const ixic = ensureMarketSnippet('나스닥', primary.ixic, fallback.ixic);
+
+  return {
+    label,
+    kospi: kospi ?? null,
+    ixic: ixic ?? null,
   };
-  return merged;
 }
