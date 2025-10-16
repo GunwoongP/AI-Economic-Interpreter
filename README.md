@@ -7,8 +7,8 @@
 ## ✨ 핵심 요약
 - **다중 전문가 체인**: Eco → Firm → House 순으로 앞선 결과를 참고해 심화 분석을 이어갑니다.
 - **RAG + LoRA**: 역할별 LoRA 어댑터와 RAG 근거 검색을 결합해 숫자·출처가 있는 해석을 생성합니다.
-- **라이브 데이터**: Yahoo Finance 기반 시계열, Naver 뉴스 API, 로컬 지식 베이스(JSONL)로 구조화된 데이터를 유지합니다.
-- **한눈에 보는 대시보드**: 오늘의 경제 상식, KOSPI/NASDAQ 스파크라인, AI 요약을 한 화면에서 확인합니다.
+- **라이브 데이터**: Yahoo Finance 기반 시계열, Naver 뉴스 API, 로컬 지식 베이스(`RAG_zzin/data/`)로 구조화된 데이터를 유지합니다.
+- **한눈에 보는 대시보드**: 오늘의 경제 상식, KOSPI/NASDAQ 스파크라인, 국내·해외 뉴스 헤드라인, AI 요약을 한 화면에서 확인합니다.
 
 ---
 
@@ -35,7 +35,7 @@ AI Core (FastAPI)
  └─ 편집 파이프라인    sequential 모드 전용 에디터
         │
 자료 계층
- ├─ data/rag/*.jsonl      역할별 문헌
+ ├─ RAG_zzin/data      RAG 원천 데이터 + 벡터 인덱스
  ├─ market_api (FastAPI)  Yahoo Finance 캐시
  └─ logs/                 orchestrator 로그
 ```
@@ -62,12 +62,16 @@ pip install -r requirements.txt
 (cd backend && npm install)
 (cd frontend && npm install)
 
-# 2. 환경 변수 템플릿 복사
+# 2. RAG 인덱스 구축 (필요 시)
+./RAG_zzin/setup_and_ingest.sh
+#  └─ .venv 설치 → requirements → RAG_zzin/data/ 인덱스 생성
+
+# 3. 환경 변수 템플릿 복사
 cp .env.example backend/.env
 cp .env.example frontend/.env
 cp .env.example ai/.env
 
-# 3. 올인원 실행
+# 4. 올인원 실행
 ./run.sh
 # market_api(8000), ai-core(8008), backend(3001), frontend(3000) 순서로 기동
 ```
@@ -97,10 +101,10 @@ cp .env.example ai/.env
 - 중복 감지를 위해 카드 normalized 텍스트 + 200자 fingerprint를 모두 비교합니다.
 
 ### 2. 데일리 인사이트
-- `/insight/daily`는 KOSPI/IXIC 시계열 + Naver 뉴스(정렬: date)를 가져온 후 두 단계로 생성합니다.
-  1. JSON 구조 통일 (코스피/나스닥 headline & bullet)
+- `/insight/daily`는 KOSPI/IXIC 시계열 + 국내/해외 뉴스(정렬: date)를 동시에 가져온 후 두 단계로 생성합니다.
+  1. JSON 구조 통일 (코스피/나스닥 headline & bullet, 뉴스 버킷 분리)
   2. `marketSummaryPrompt`로 자연어 요약(4~6문장) 생성
-- 프런트는 fallback 텍스트를 준비해 API 실패 시에도 UI가 깨지지 않습니다.
+- 프런트는 API 실패 또는 지수 미수신 시에도 인덱스 데이터를 활용해 스파크라인과 요약을 보여줍니다.
 
 ### 3. 역할별 LoRA 어댑터
 - `ai/main.py`에서 eco/firm/house 어댑터 경로를 등록하고, `set_active_lora` 지원 시 핫스왑합니다.
@@ -155,7 +159,10 @@ import fetch from 'node-fetch';
 
 ## 🛠️ 개발 노트
 - 코드 스타일: TypeScript `pnpm lint`, Python `ruff` 추천 (설치만 하면 됨)
-- RAG 데이터 추가: `backend/data/rag/{eco,firm,house}.jsonl`에 JSON Lines로 문서를 추가하면 즉시 반영됩니다.
+- RAG 데이터 추가:
+  1. `RAG_zzin/data/` 아래 JSON/JSONL 파일로 원천 데이터를 보강합니다.
+  2. `RAG_zzin/setup_and_ingest.sh`를 다시 실행해 벡터 인덱스를 재생성합니다.
+  3. 백엔드 재기동 없이도 최신 인덱스를 바로 사용합니다.
 - 멀티 사용자: 현재는 로컬호스트 기반이며, 프런트가 로컬 스토리지를 이용해 히스토리를 보관합니다. 외부 공유 시 세션 토큰/로그 저장소를 추가로 구현하세요.
 - Docker: `docker compose up --build`로 프런트/백엔드/AI 코어를 한 번에 띄울 수 있습니다 (시장 API는 선택적으로 compose에 추가).
 
@@ -167,7 +174,7 @@ ai/                 # AI Core (FastAPI, LoRA 관리)
 backend/            # Express API + RAG 로직
 frontend/           # Next.js UI
 market_api/         # Yahoo Finance 프록시 (FastAPI)
-data/rag/           # 역할별 RAG 데이터셋(JSONL)
+RAG_zzin/           # RAG 데이터/인덱스 관리 스크립트
 logs/               # run.sh 실행 로그
 run.sh              # 올인원 부트스트랩 스크립트
 ```
