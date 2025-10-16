@@ -1,6 +1,0 @@
-{
-  "dim": 4096,
-  "metric": "cosine",
-  "index_spec": "IVF4096,Flat",
-  "nprobe": 8
-}

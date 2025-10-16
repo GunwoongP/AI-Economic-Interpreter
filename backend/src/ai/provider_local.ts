@@ -50,18 +50,32 @@ export async function localGenerate(
   if (opts?.loraName) {
     payload.lora_name = opts.loraName;
   }
-  const res = await fetch(`${base}/chat`, {
+  const endpoint = `${base}/chat`;
+  const loraLabel = opts?.loraName ? ` lora=${opts.loraName}` : '';
+  console.log(`[AI][request] target=${target} url=${endpoint}${loraLabel}
+${JSON.stringify(payload, null, 2)}`);
+
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const preview = (messages.find((m) => m.role === 'user')?.content || '').slice(0, 60);
-  const loraLabel = opts?.loraName ? ` lora=${opts.loraName}` : '';
-  console.log(`[AI] ${target} -> ${base}${loraLabel} ::`, preview);
+
+  const responseText = await res.text();
+  console.log(`[AI][response] target=${target} status=${res.status} url=${endpoint}
+${responseText}`);
+
   if (!res.ok) {
-    throw new Error(`LOCAL AI HTTP ${res.status} (${target}@${base}): ${await res.text()}`);
+    throw new Error(`LOCAL AI HTTP ${res.status} (${target}@${base}): ${responseText}`);
   }
-  const json: any = await res.json();
+
+  let json: any = {};
+  try {
+    json = responseText ? JSON.parse(responseText) : {};
+  } catch (err) {
+    throw new Error(`LOCAL AI JSON parse failed (${target}@${base}): ${(err as Error).message}
+${responseText}`);
+  }
   return { content: (json.content || '').trim(), raw: json };
 }
 

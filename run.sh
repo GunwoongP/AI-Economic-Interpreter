@@ -26,6 +26,13 @@ AI_VERIFY_PAYLOAD='{"messages":[{"role":"user","content":"ping"}]}'
 
 VERIFY_STARTUP="${VERIFY_STARTUP:-1}"
 
+# Bind AI services to the freshly compiled 32K LoRA models by default (can be overridden via env)
+MODEL_BACKEND="${MODEL_BACKEND:-rbln}"
+ECO_MODEL_ID="${ECO_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_eco_32k/compiled}"
+FIRM_MODEL_ID="${FIRM_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_firm_32k/compiled}"
+HOUSE_MODEL_ID="${HOUSE_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_house_32k/compiled}"
+export MODEL_BACKEND ECO_MODEL_ID FIRM_MODEL_ID HOUSE_MODEL_ID
+
 mkdir -p "$LOG_DIR"
 
 declare -a SERVICE_PIDS=()

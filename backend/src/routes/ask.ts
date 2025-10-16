@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { AskInput, AskOutput, Card, Role } from '../types.js';
-import { searchRAG } from '../ai/rag.js';
 import { attachAdapters, detachAll, genDraft, genEditor, planRoles, AskRole } from '../ai/bridge.js';
 import { getRoleBases } from '../ai/provider_local.js';
 
@@ -60,6 +59,20 @@ function enforceAllowed(path: AskRole[]): AskRole[] {
 function selectRoles(q: string, prefer: Role[] = []): AskRole[] {
   const s = (q || '').toLowerCase();
   const buffer: Role[] = Array.isArray(prefer) ? prefer.slice(0, 3) : [];
+
+  // Special intent routing: force paths for common Korean phrasings
+  // 1) "코스피가 뭐야/무엇/뜻/설명" -> eco only
+  if (/코스피/.test(s) && /(뭐야|무엇|뜻|설명)/.test(s)) {
+    return ['eco'];
+  }
+  // 2) "오르는 데 가장 기여한 기업" 등 -> eco -> firm
+  if (/(기여|기여한).*(기업)/.test(s) || /(기여).*(코스피|지수)/.test(s)) {
+    return ['eco', 'firm'];
+  }
+  // 3) "어떤 기업에 투자하면 좋을까" 등 -> eco -> firm -> house
+  if (/(어떤\s*기업|기업).*투자(하면|할까|좋을까)/.test(s) || /(투자).*(기업)/.test(s)) {
+    return ['eco', 'firm', 'house'];
+  }
 
   if (/(금리|환율|정책|경기|물가|부동산|dxy|유가)/.test(s)) buffer.push('eco');
   if (/(per|roe|재무|실적|기업|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) buffer.push('firm');
@@ -188,40 +201,6 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
     return normalized ? normalized.slice(0, 200) : '';
   };
   const hasCitation = (text: string) => /\(근거\d+\s*\|/.test(text);
-  const buildRoleQuery = (role: AskRole, base: string, previous: Card[]): string => {
-    let query = base.trim();
-    if (previous.length) {
-      const prevSummary = previous
-        .map((card) => `${card.title} ${card.content}`.replace(/\s+/g, ' ').slice(0, 300))
-        .join(' ');
-      if (prevSummary) {
-        query = `${query} ${prevSummary}`.trim();
-      }
-    }
-    if (role === 'firm') {
-      query = `${query} 수혜 업종 기업 실적 전망 투자`;
-    } else if (role === 'house') {
-      query = `${query} 가계 투자전략 포트폴리오 위험 관리`;
-    }
-    return query.slice(0, 2000);
-  };
-  const fetchEvidence = async (role: AskRole, query: string, fallback: string) => {
-    try {
-      const hits = await searchRAG(query, [role] as any);
-      if (hits.length) return hits;
-    } catch (err) {
-      console.error(`[ASK][RAG][${role}]`, err);
-    }
-    if (query !== fallback) {
-      try {
-        const hits = await searchRAG(fallback, [role] as any);
-        if (hits.length) return hits;
-      } catch (err) {
-        console.error(`[ASK][RAG][${role}][fallback]`, err);
-      }
-    }
-    return [];
-  };
 
   await attachAdapters(roles);
 
@@ -235,11 +214,7 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
               .filter(Boolean) as Card[]
           : [];
 
-      const roleQuery = buildRoleQuery(role, q, previous);
-      let ev = await fetchEvidence(role, roleQuery, q);
-      if (!ev.length && generationRoles.length === 1) {
-        ev = await fetchEvidence(role, q, q);
-      }
+      const evidences: any[] = [];
 
       const existingNormalized = new Set(usedNormalized);
       const existingFingerprints = new Set(usedFingerprints);

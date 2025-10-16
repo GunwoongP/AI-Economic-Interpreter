@@ -52,22 +52,42 @@ interface SeriesSummaryInfo {
   pct: number;
   direction: '상승' | '하락' | '보합';
   latest: number;
+  previous: number;
+  spanChange: number;
+  spanPct: number;
+  spanStart: string;
 }
 
 function describeSeries(series: SeriesResp): SeriesSummaryInfo {
   const first = series.values[0];
   const last = series.values.at(-1)!;
-  const change = last.close - first.close;
-  const pct = first.close ? (change / first.close) * 100 : 0;
+  const prev = series.values.length > 1 ? series.values.at(-2)! : last;
+  const change = last.close - prev.close;
+  const pct = prev.close ? (change / prev.close) * 100 : 0;
+  const spanChange = last.close - first.close;
+  const spanPct = first.close ? (spanChange / first.close) * 100 : 0;
   const direction: SeriesSummaryInfo['direction'] =
     change > 0 ? '상승' : change < 0 ? '하락' : '보합';
-  const trend = `${series.symbol} ${direction} (${change >= 0 ? '+' : ''}${change.toFixed(
+  const marketLabel = series.symbol === 'KOSPI' ? '코스피' : '나스닥';
+  const trend = `${marketLabel} ${direction} (${change >= 0 ? '+' : ''}${change.toFixed(
     2,
   )}, ${pct.toFixed(2)}%)`;
-  const summary = `${series.stamp} 기준 종가 ${last.close.toFixed(
+  const dailyRefDate = new Date(prev.t).toLocaleDateString();
+  const summary = `${series.stamp} ${marketLabel} 종가 ${last.close.toFixed(
     2,
-  )} / ${new Date(first.t).toLocaleDateString()} 대비 ${direction}`;
-  return { trend, summary, change, pct, direction, latest: last.close };
+  )}p, 전일(${dailyRefDate}) 대비 ${change >= 0 ? '+' : ''}${change.toFixed(2)}p (${pct.toFixed(2)}%)`;
+  return {
+    trend,
+    summary,
+    change,
+    pct,
+    direction,
+    latest: last.close,
+    previous: prev.close,
+    spanChange,
+    spanPct,
+    spanStart: new Date(first.t).toLocaleDateString(),
+  };
 }
 
 function sanitizeGenerated(raw: string): string {
@@ -262,7 +282,30 @@ export async function planRoles(params: { query: string; prefer?: Role[]; hintMo
 }
 
 function stripChainOfThought(raw: string): string {
-  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  if (!raw) return '';
+  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  text = text.replace(/<\/?think>/gi, '');
+
+  if (/\/think/i.test(text)) {
+    const hasExplicitFinal = /\/(?:final|answer|response|assistant)\b/i.test(text);
+    if (hasExplicitFinal) {
+      text = text.replace(/\/think[\s\S]*?(?=\/(?:final|answer|response|assistant)\b)/gi, '');
+      text = text.replace(/\/(?:final|answer|response|assistant)\b[:\s]*/gi, '');
+    } else {
+      const lower = text.toLowerCase();
+      const lastIdx = lower.lastIndexOf('/think');
+      if (lastIdx >= 0) {
+        text = text.slice(lastIdx + '/think'.length);
+      }
+    }
+  }
+
+  text = text
+    .split('\n')
+    .filter((line) => !line.trim().toLowerCase().startsWith('/think'))
+    .join('\n');
+
+  return text.trim();
 }
 
 function extractJsonObject(raw: string): string | null {
@@ -409,22 +452,34 @@ function ensureMarketSnippet(
   const fallbackBody = stripMarketPrefix(fallbackSnippet?.title);
   const titleBody = primaryBody || fallbackBody || '핵심 요약';
 
-  let lines = (primarySnippet?.lines ?? []).map((line) => clampLine(line)).filter(Boolean);
-  if (!lines.length) {
-    lines = (fallbackSnippet?.lines ?? []).map((line) => clampLine(line)).filter(Boolean);
-  }
+  const collected: string[] = [];
+  const pushLine = (line: string | undefined) => {
+    const next = clampLine(line ?? '');
+    if (!next) return;
+    if (collected.some((existing) => existing === next)) return;
+    collected.push(next);
+  };
+
+  (fallbackSnippet?.lines ?? []).forEach((line) => pushLine(line));
+  (primarySnippet?.lines ?? []).forEach((line) => pushLine(line));
 
   return {
     title: `${market} ${direction} · ${titleBody}`,
-    lines,
+    lines: collected.slice(0, 3),
   };
 }
 
-function formatChangeLine(info: SeriesSummaryInfo): string {
-  const change = info.change >= 0 ? `+${info.change.toFixed(2)}` : info.change.toFixed(2);
-  const pct = info.pct >= 0 ? `+${info.pct.toFixed(2)}` : info.pct.toFixed(2);
+function directionNarrative(direction: SeriesSummaryInfo['direction']): string {
+  if (direction === '상승') return '상승세';
+  if (direction === '하락') return '약세';
+  return '보합권';
+}
+
+function formatChangeLine(market: '코스피' | '나스닥', info: SeriesSummaryInfo): string {
+  const changeText = formatChangeText(info);
+  const mood = directionNarrative(info.direction);
   return clampLine(
-    `${info.trend}. 종가는 ${info.latest.toFixed(2)}p로 ${change} (${pct}%) 움직였습니다.`,
+    `오늘 ${market}은 ${mood}로 마감했고 종가는 ${info.latest.toFixed(2)}p(전일 대비 ${changeText})입니다.`,
   );
 }
 
@@ -435,19 +490,25 @@ function formatChangeText(info: SeriesSummaryInfo): string {
 }
 
 function formatNewsLine(
-  info: SeriesSummaryInfo,
+  market: '코스피' | '나스닥',
   newsItem: { title?: string; description?: string } | undefined,
 ): string {
   if (!newsItem) {
-    return clampLine(`주요 원인: ${info.summary}`);
-}
+    return '';
+  }
   const title = newsItem.title?.replace(/<\/?[^>]+>/g, '').trim() || '';
   const desc = newsItem.description?.replace(/<\/?[^>]+>/g, '').trim() || '';
   const combined = `${title || desc}`.trim();
   if (!combined) {
-    return clampLine(`주요 원인: ${info.summary}`);
+    return '';
   }
-  return clampLine(`핵심 이슈: ${combined}`);
+  return clampLine(`오늘 ${market} 관련 이슈로는 ${combined} 등이 주목받았습니다. [뉴스]`);
+}
+
+function formatSummaryLine(info: SeriesSummaryInfo): string {
+  const spanChangeText = info.spanChange >= 0 ? `+${info.spanChange.toFixed(2)}p` : info.spanChange.toFixed(2);
+  const spanPctText = info.spanPct >= 0 ? `+${info.spanPct.toFixed(2)}%` : info.spanPct.toFixed(2);
+  return clampLine(`${info.spanStart} 이후 누적 흐름은 ${spanChangeText} (${spanPctText})입니다.`);
 }
 
 function buildFallbackInsights(
@@ -460,35 +521,43 @@ function buildFallbackInsights(
   const [headline1, headline2] = headlines;
 
   const makeLines = (
+    market: '코스피' | '나스닥',
     info: ReturnType<typeof describeSeries>,
     headline: { title: string; description: string } | undefined,
   ): string[] => {
     const lines: string[] = [];
-    lines.push(formatChangeLine(info));
-    lines.push(formatNewsLine(info, headline));
-    lines.push(clampLine(info.summary));
+    lines.push(formatChangeLine(market, info));
+    const newsLine = formatNewsLine(market, headline);
+    if (newsLine) {
+      lines.push(newsLine);
+    }
+    const summaryLine = formatSummaryLine(info);
+    if (summaryLine) {
+      lines.push(summaryLine);
+    }
     return lines.filter(Boolean).slice(0, 3);
   };
 
-  const kospiLines = makeLines(kospiInfo, headline1);
-  const ixicLines = makeLines(ixicInfo, headline2 ?? headline1);
+  const kospiLines = makeLines('코스피', kospiInfo, headline1);
+  const ixicLines = makeLines('나스닥', ixicInfo, headline2 ?? headline1);
 
   return {
     label,
     kospi: kospiLines.length
       ? {
-          title: clampLine(`코스피 ${kospiInfo.direction} 요약`),
+          title: clampLine(`코스피 ${kospiInfo.direction} · ${formatChangeText(kospiInfo)}`),
           lines: kospiLines,
         }
       : null,
     ixic: ixicLines.length
       ? {
-          title: clampLine(`나스닥 ${ixicInfo.direction} 요약`),
+          title: clampLine(`나스닥 ${ixicInfo.direction} · ${formatChangeText(ixicInfo)}`),
           lines: ixicLines,
         }
       : null,
   };
 }
+
 
 function mergeInsights(primary: InsightBundle | null, fallback: InsightBundle): InsightBundle {
   if (!primary) {

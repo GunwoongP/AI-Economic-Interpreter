@@ -128,7 +128,7 @@ export default function DailyTerm() {
   }, [index, effectiveTotal, terms]);
 
   const isCurrentLoading = isLoading && !current;
-  const disablePrev = effectiveTotal != null ? effectiveTotal <= 1 : index === 0;
+  const disablePrev = effectiveTotal != null ? effectiveTotal <= 1 : index <= 0;
   const disableNext = effectiveTotal != null ? effectiveTotal <= 1 : false;
 
   const handlePrev = () => {

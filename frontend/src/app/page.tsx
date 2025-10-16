@@ -60,6 +60,144 @@ const DEFAULT_IXIC_INSIGHT = {
   ],
 } as const;
 
+type TrendTone = 'up' | 'down' | 'flat';
+type TrendMeta = {
+  icon: string;
+  direction: '상승' | '하락' | '보합';
+};
+type TrendInfo = {
+  tone: TrendTone;
+  icon: string;
+  direction: TrendMeta['direction'];
+  changeText: string;
+};
+
+const TREND_MAP: Record<TrendTone, TrendMeta> = {
+  up: { icon: '▲', direction: '상승' },
+  down: { icon: '▼', direction: '하락' },
+  flat: { icon: '●', direction: '보합' },
+};
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function computeTrendInfo(series?: SeriesResp | null): TrendInfo | null {
+  if (!series || !Array.isArray(series.values) || series.values.length === 0) {
+    return null;
+  }
+  const lastPoint = series.values[series.values.length - 1];
+  const prevPoint = series.values.length > 1 ? series.values[series.values.length - 2] : lastPoint;
+  const delta = lastPoint.close - prevPoint.close;
+  const pct = prevPoint.close === 0 ? 0 : (delta / prevPoint.close) * 100;
+  let tone: TrendTone = 'flat';
+  if (delta > 0) {
+    tone = 'up';
+  } else if (delta < 0) {
+    tone = 'down';
+  }
+  const meta = TREND_MAP[tone];
+  const changeText =
+    tone === 'flat'
+      ? `${delta.toFixed(2)}p (${pct.toFixed(2)}%)`
+      : `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}p (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`;
+  return {
+    tone,
+    icon: meta.icon,
+    direction: meta.direction,
+    changeText,
+  };
+}
+
+type InsightSource = {
+  title?: string | null;
+  lines?: string[] | null;
+} | null;
+
+function buildInsight({
+  market,
+  label,
+  primary,
+  fallback,
+  series,
+}: {
+  market: '코스피' | '나스닥';
+  label: string;
+  primary: InsightSource;
+  fallback: { title: string; lines: readonly string[] };
+  series?: SeriesResp | null;
+}) {
+  const primaryLines = Array.isArray(primary?.lines) ? primary?.lines ?? [] : [];
+  const normalizedPrimaryLines = primaryLines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const fallbackLines = [...fallback.lines];
+  const safeLines = normalizedPrimaryLines.length ? normalizedPrimaryLines : fallbackLines;
+
+  const primaryTitle = primary?.title?.trim() || '';
+  const fallbackTitle = fallback.title.trim();
+  const primaryLinesKey = normalizedPrimaryLines.join('');
+  const fallbackLinesKey = fallbackLines.map((line) => line.trim()).filter(Boolean).join('');
+  const isFallbackPayload =
+    !primary ||
+    (!primaryTitle && !normalizedPrimaryLines.length) ||
+    (primaryTitle === fallbackTitle && primaryLinesKey === fallbackLinesKey);
+
+  const rawTitle = (primaryTitle || fallbackTitle).slice(0, 80);
+  const sanitizedTitle = rawTitle.replace(/\s+/g, ' ').trim();
+
+  const trend = computeTrendInfo(series);
+  const marketPrefix = new RegExp(`^${escapeRegExp(market)}\s*(상승|하락|보합)?\s*[·:\-]?\s*`, 'i');
+  const strippedTitle = sanitizedTitle.replace(/^[▲▼●]\s*/, '');
+  const body = strippedTitle.replace(marketPrefix, '').trim();
+  const normalizedBody = body.replace(/\s+/g, ' ').trim();
+  const normalizedChange = trend?.changeText ? trend.changeText.replace(/\s+/g, ' ').trim() : '';
+  const bodyWithoutDirection = normalizedBody.replace(/^(상승세|약세|보합권|상승|하락|보합)\s*[·:\-]?\s*/i, '').trim();
+  const bodyCore = bodyWithoutDirection.replace(/^[+▲▼●]\s*/, '').trim();
+  const isBodyOnlyChange = !bodyCore || bodyCore === normalizedChange;
+  const shouldKeepBody = Boolean(primaryTitle) && !isFallbackPayload && !isBodyOnlyChange;
+
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  const pushLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    lines.push(trimmed);
+  };
+
+  if (shouldKeepBody) {
+    pushLine(body);
+  }
+  safeLines.forEach((line) => pushLine(line));
+  if (!lines.length) {
+    pushLine(sanitizedTitle);
+  }
+  const description = lines.join('');
+
+  if (!trend) {
+    return {
+      label,
+      title: sanitizedTitle,
+      description,
+    };
+  }
+
+  const headlineParts = [`${market} ${trend.direction}`];
+  if (trend.changeText) {
+    headlineParts.push(trend.changeText);
+  }
+  const decoratedTitle = `${trend.icon} ${headlineParts.join(' · ')}` + (shouldKeepBody ? ` · ${body}` : '');
+
+  return {
+    label,
+    title: decoratedTitle,
+    description,
+    tone: trend.tone,
+    icon: trend.icon,
+  };
+}
 function useSeries(symbol: SeriesResp['symbol']) {
   return useQuery({
     queryKey: ['series', symbol],
@@ -144,35 +282,29 @@ export default function Page() {
   const dailyData = dailyInsight.data;
   const insightLabel = dailyData?.insights?.label?.trim() || DEFAULT_INSIGHT_LABEL;
 
-  const kospiInsight = useMemo(() => {
-    const ai = dailyData?.insights?.kospi;
-    const lines = (ai?.lines ?? [])
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(0, 3);
-    const safeLines = lines.length ? lines : [...DEFAULT_KOSPI_INSIGHT.lines];
-    const title = (ai?.title?.trim() || DEFAULT_KOSPI_INSIGHT.title).slice(0, 80);
-    return {
-      label: insightLabel,
-      title,
-      description: safeLines.join('\n'),
-    };
-  }, [dailyData, insightLabel]);
+  const kospiInsight = useMemo(
+    () =>
+      buildInsight({
+        market: '코스피',
+        label: insightLabel,
+        primary: dailyData?.insights?.kospi ?? null,
+        fallback: DEFAULT_KOSPI_INSIGHT,
+        series: dailyData?.series?.kospi ?? kospi.data ?? null,
+      }),
+    [dailyData, insightLabel, kospi.data],
+  );
 
-  const ixicInsight = useMemo(() => {
-    const ai = dailyData?.insights?.ixic;
-    const lines = (ai?.lines ?? [])
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(0, 3);
-    const safeLines = lines.length ? lines : [...DEFAULT_IXIC_INSIGHT.lines];
-    const title = (ai?.title?.trim() || DEFAULT_IXIC_INSIGHT.title).slice(0, 80);
-    return {
-      label: insightLabel,
-      title,
-      description: safeLines.join('\n'),
-    };
-  }, [dailyData, insightLabel]);
+  const ixicInsight = useMemo(
+    () =>
+      buildInsight({
+        market: '나스닥',
+        label: insightLabel,
+        primary: dailyData?.insights?.ixic ?? null,
+        fallback: DEFAULT_IXIC_INSIGHT,
+        series: dailyData?.series?.ixic ?? ixic.data ?? null,
+      }),
+    [dailyData, insightLabel, ixic.data],
+  );
 
   const tileClass = 'rounded-3xl border border-border/60 bg-panel/90 p-5 text-sm shadow-soft backdrop-blur';
   const sampleQuestions = [
