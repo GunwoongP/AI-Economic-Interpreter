@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import type { AskInput, AskOutput, Card, Role } from '../types.js';
-import { attachAdapters, detachAll, genDraft, genEditor, planRoles, AskRole } from '../ai/bridge.js';
+import { attachAdapters, detachAll, genDraft, genEditor, planRoles, AskRole, Evidence } from '../ai/bridge.js';
 import { getRoleBases } from '../ai/provider_local.js';
+import { searchRAG } from '../ai/rag.js';
 
 const router = Router();
 
@@ -174,6 +175,97 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
   };
 }
 
+
+
+const ROLE_QUERY_HINTS: Record<AskRole, string[]> = {
+  eco: ['금리', '환율', '물가', '성장률', '정책'],
+  firm: ['실적', '산업', '기업', '수익성', '밸류에이션'],
+  house: ['가계', '포트폴리오', '대출', '소비', '위험 관리'],
+};
+
+function compactCardForContext(card: Card, maxLines = 4, maxChars = 420): Card {
+  const lines = card.content
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const cleaned: string[] = [];
+  for (const line of lines) {
+    const normalized = line.replace(/^[*\u2022-]\s*/, '').trim();
+    if (!normalized) continue;
+    cleaned.push(normalized);
+    if (cleaned.length >= maxLines) break;
+  }
+
+  let body = cleaned.length ? cleaned.map((line) => `- ${line}`).join('\n') : card.content.trim();
+  if (body.length > maxChars) {
+    body = `${body.slice(0, maxChars).trimEnd()}...`;
+  }
+
+  return {
+    ...card,
+    content: body,
+  };
+}
+
+function buildRoleQuery(role: AskRole, question: string, previous: Card[]): string {
+  const parts: string[] = [];
+  const trimmedQ = (question || '').trim();
+  if (trimmedQ) {
+    parts.push(trimmedQ);
+  }
+  if (previous.length) {
+    const previousText = previous
+      .map((card) => `[${card.type.toUpperCase()}] ${card.title}: ${card.content}`)
+      .join('\n');
+    parts.push(previousText);
+  }
+  const hints = ROLE_QUERY_HINTS[role];
+  if (hints?.length) {
+    parts.push(`역할 키워드: ${hints.join(', ')}`);
+  }
+  const joined = parts.join('\n\n').trim();
+  return joined.length > 2048 ? joined.slice(0, 2048) : joined;
+}
+
+async function gatherEvidence(role: AskRole, question: string, previous: Card[]): Promise<Evidence[]> {
+  if (!question?.trim()) return [];
+  const query = buildRoleQuery(role, question, previous);
+  try {
+    let hits = await searchRAG(query, [role], 4);
+    if (!hits.length && previous.length) {
+      hits = await searchRAG(question, [role], 4);
+    }
+    const seen = new Set<string>();
+    const uniqueHits = hits.filter((hit) => {
+      const key = hit.text.trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return uniqueHits.slice(0, 2).map((hit, idx) => {
+      const meta = (hit.meta && typeof hit.meta === 'object') ? (hit.meta as Record<string, unknown>) : {};
+      const source = typeof meta.title === 'string' && meta.title.trim().length
+        ? meta.title.trim()
+        : typeof meta.source === 'string' && meta.source.trim().length
+        ? meta.source.trim()
+        : undefined;
+      const date = typeof meta.date === 'string' && meta.date.trim().length ? meta.date.trim() : undefined;
+      return {
+        text: hit.text,
+        meta: hit.meta,
+        sim: hit.sim,
+        label: `RAG#${idx + 1}`,
+        source,
+        date,
+      };
+    });
+  } catch (err) {
+    console.error(`[ASK][RAG][ERROR][${role}]`, err);
+    return [];
+  }
+}
+
 interface AskRunOptions {
   onDraft?: (draft: Card) => Promise<void> | void;
 }
@@ -200,13 +292,13 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
     const normalized = normalizeContent(text);
     return normalized ? normalized.slice(0, 200) : '';
   };
-  const hasCitation = (text: string) => /\(근거\d+\s*\|/.test(text);
+  const hasCitation = (text: string) => /\(RAG#\d+\s*\|/.test(text);
 
   await attachAdapters(roles);
 
   try {
     const runRole = async (role: AskRole, index: number) => {
-      const previous =
+      const rawPrevious =
         mode === 'sequential'
           ? generationRoles
               .slice(0, index)
@@ -214,7 +306,8 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
               .filter(Boolean) as Card[]
           : [];
 
-      const evidences: any[] = [];
+      const previousForContext = rawPrevious.slice(-3).map((card) => compactCardForContext(card));
+      const evidences = await gatherEvidence(role, q, previousForContext);
 
       const existingNormalized = new Set(usedNormalized);
       const existingFingerprints = new Set(usedFingerprints);
@@ -222,41 +315,77 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
       let selected: Card | null = null;
       let normalized = '';
       let fingerprint = '';
-      for (const temp of attemptTemps) {
-        const candidate = await genDraft(role, q, ev, { previous, temperature: temp });
+
+      const generateCandidate = async (temperature: number) => {
+        const candidate = await genDraft(role, q, evidences, {
+          previous: previousForContext,
+          temperature,
+        });
         const candidateNormalized = normalizeContent(candidate.content);
         const candidateFingerprint = fingerprintContent(candidate.content);
         const hasMinLength = candidateNormalized.length >= 80;
-        const hasRef = hasCitation(candidate.content);
+        return { candidate, candidateNormalized, candidateFingerprint, hasMinLength };
+      };
+
+      for (const temp of attemptTemps) {
+        const { candidate, candidateNormalized, candidateFingerprint, hasMinLength } = await generateCandidate(temp);
+        if (!hasMinLength) continue;
+        if (existingNormalized.has(candidateNormalized)) continue;
+        if (candidateFingerprint && existingFingerprints.has(candidateFingerprint)) continue;
+
         selected = candidate;
         normalized = candidateNormalized;
         fingerprint = candidateFingerprint;
-        if (!hasMinLength) {
-          continue;
-        }
-        if (existingNormalized.has(candidateNormalized)) {
-          continue;
-        }
-        if (candidateFingerprint && existingFingerprints.has(candidateFingerprint)) {
-          continue;
-        }
-        if (!hasRef && ev.length) {
-          continue;
-        }
         break;
       }
 
-      const finalDraft = selected ?? (await genDraft(role, q, ev, { previous, temperature: 0.7 }));
-      normalized = normalizeContent(finalDraft.content) || normalized;
-      fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
-      let duplicateDetected = normalized ? existingNormalized.has(normalized) : false;
-      if (!duplicateDetected && fingerprint) {
-        duplicateDetected = existingFingerprints.has(fingerprint);
+      if (!selected) {
+        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.7);
+        selected = candidate;
+        normalized = candidateNormalized;
+        fingerprint = candidateFingerprint;
       }
 
-      if (!hasCitation(finalDraft.content) && ev.length) {
-        const top = ev[0];
-        const ref = `(근거1 | ${top.meta?.date ?? 'N/A'} | ${top.meta?.source ?? top.meta?.title ?? '출처 없음'})`;
+      if (!normalized || normalized.length < 80) {
+        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.85);
+        if (candidateNormalized.length > (normalized?.length ?? 0)) {
+          selected = candidate;
+          normalized = candidateNormalized;
+          fingerprint = candidateFingerprint;
+        }
+      }
+
+      let finalDraft: Card = selected as Card;
+      normalized = normalized || normalizeContent(finalDraft.content);
+      fingerprint = fingerprint || fingerprintContent(finalDraft.content);
+
+      let duplicateDetected =
+        (normalized && existingNormalized.has(normalized)) ||
+        (fingerprint && existingFingerprints.has(fingerprint));
+
+      if (duplicateDetected) {
+        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.95);
+        if (
+          candidateNormalized &&
+          !existingNormalized.has(candidateNormalized) &&
+          (!candidateFingerprint || !existingFingerprints.has(candidateFingerprint))
+        ) {
+          finalDraft = candidate;
+          normalized = candidateNormalized;
+          fingerprint = candidateFingerprint;
+        }
+      }
+
+      duplicateDetected =
+        (normalized && existingNormalized.has(normalized)) ||
+        (fingerprint && existingFingerprints.has(fingerprint));
+
+      if (!hasCitation(finalDraft.content) && evidences.length) {
+        const top = evidences[0];
+        const label = top.label ?? 'RAG#1';
+        const date = top.date ?? (typeof top.meta?.date === 'string' ? top.meta.date : 'N/A');
+        const source = top.source ?? top.meta?.source ?? top.meta?.title ?? 'RAG 근거';
+        const ref = `(${label} | ${date ?? 'N/A'} | ${source})`;
         const lines = finalDraft.content.split('\n');
         let injected = false;
         const next = lines.map((line) => {
@@ -270,26 +399,32 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
         if (injected) {
           finalDraft.content = next.join('\n');
           normalized = normalizeContent(finalDraft.content);
-          fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
-          duplicateDetected = normalized ? existingNormalized.has(normalized) : duplicateDetected;
-          if (!duplicateDetected && fingerprint) {
-            duplicateDetected = existingFingerprints.has(fingerprint);
-          }
+          fingerprint = fingerprintContent(finalDraft.content);
+          duplicateDetected =
+            (normalized && existingNormalized.has(normalized)) ||
+            (fingerprint && existingFingerprints.has(fingerprint));
         }
       }
 
-      if (duplicateDetected && ev.length) {
-        const top = ev[0];
-        const ref = `(근거F | ${top.meta?.date ?? 'N/A'} | ${top.meta?.source ?? top.meta?.title ?? '출처 없음'})`;
+      if (duplicateDetected && evidences.length) {
+        const top = evidences[0];
+        const label = top.label ? `${top.label}-F` : 'RAG#F';
+        const date = top.date ?? (typeof top.meta?.date === 'string' ? top.meta.date : 'N/A');
+        const source = top.source ?? top.meta?.source ?? top.meta?.title ?? 'RAG 근거';
+        const ref = `(${label} | ${date} | ${source})`;
         const roleTag =
           role === 'firm'
             ? '기업 관점'
             : role === 'house'
             ? '가계 관점'
             : '거시 관점';
-        finalDraft.content = `${finalDraft.content}\n- ${roleTag} 추가 인사이트: ${top.meta?.title ?? 'RAG 요약'} ${ref}`.trim();
+        const summaryTitle = top.meta?.title ?? source ?? 'RAG 요약';
+        finalDraft.content = `${finalDraft.content}\n- ${roleTag} 추가 인사이트: ${summaryTitle} ${ref}`.trim();
         normalized = normalizeContent(finalDraft.content);
-        fingerprint = fingerprintContent(finalDraft.content) || fingerprint;
+        fingerprint = fingerprintContent(finalDraft.content);
+        duplicateDetected =
+          (normalized && existingNormalized.has(normalized)) ||
+          (fingerprint && existingFingerprints.has(fingerprint));
       }
 
       if (normalized) {
@@ -379,37 +514,7 @@ router.post('/stream', async (req, res) => {
 
     send({ type: 'start', data: { ts: started } });
 
-    const out = await runAsk(prepared, {
-      async onDraft(draft) {
-        const chunks = draft.content
-          .split(/\n+/)
-          .map((part) => part.trim().replace(/^[*-]\s*/, ''))
-          .filter(Boolean);
-
-        if (!chunks.length) {
-          send({
-            type: 'line',
-            data: {
-              role: draft.type,
-              title: draft.title,
-              text: draft.content,
-            },
-          });
-          return;
-        }
-
-        chunks.forEach((text) => {
-          send({
-            type: 'line',
-            data: {
-              role: draft.type,
-              title: draft.title,
-              text,
-            },
-          });
-        });
-      },
-    });
+    const out = await runAsk(prepared);
 
     const completed = Date.now();
     if (!out.meta) out.meta = { mode: prepared.mode, roles: prepared.roles };

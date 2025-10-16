@@ -39,7 +39,7 @@ def main():
         p = Process(
             target=run_server,
             args=(role, port, model_id),
-            kwargs={"temperature": 0.2, "max_tokens": 1024, "backend": backend},
+            kwargs={"temperature": 0.2, "max_tokens": 2048, "backend": backend},
         )
         p.start()
         procs[role] = p

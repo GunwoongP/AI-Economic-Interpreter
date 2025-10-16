@@ -12,6 +12,7 @@ const ROLE_TAG: Record<
   eco: { label: '경제해석', icon: '🟣', className: 'border-[#7C8FFF]/40 bg-[#7C8FFF]/12 text-text' },
   firm: { label: '기업분석', icon: '🟠', className: 'border-[#FF8A3D]/40 bg-[#FF8A3D]/12 text-text' },
   house: { label: '가계조언', icon: '🔵', className: 'border-[#4AA3FF]/40 bg-[#4AA3FF]/12 text-text' },
+  combined: { label: '통합요약', icon: '🟢', className: 'border-border/40 bg-chip/70 text-text' },
 };
 
 export default function Card({ c, variant = 'default' }: { c: TCard; variant?: Variant }) {

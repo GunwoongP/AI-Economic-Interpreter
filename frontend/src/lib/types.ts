@@ -34,7 +34,7 @@ export interface NewsItem {
 
 export interface DailyInsight {
   query: string;
-  news: NewsItem[];
+  news: { domestic: NewsItem[]; global: NewsItem[]; combined: NewsItem[] };
   series: { kospi: SeriesResp; ixic: SeriesResp };
   summary?: string | null;
   insights?: {

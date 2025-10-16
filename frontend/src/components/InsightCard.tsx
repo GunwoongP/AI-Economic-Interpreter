@@ -8,6 +8,7 @@ const VARIANT: Record<TCard['type'], string> = {
   eco: 'from-sky-500/20 via-cyan-500/15 to-slate-500/5',
   firm: 'from-orange-500/20 via-amber-500/10 to-rose-500/5',
   house: 'from-blue-500/15 via-emerald-500/10 to-lime-500/5',
+  combined: 'from-accent/25 via-accent/10 to-slate-500/5',
 };
 
 export default function InsightCard({ card }: Props) {

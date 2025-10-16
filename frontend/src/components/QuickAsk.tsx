@@ -35,7 +35,7 @@ return (
 <div className="flex items-center justify-between gap-3">
 <h3 className="text-sm font-semibold">빠른 질문</h3>
 <div className="flex gap-2">
-<MetricChips data={metrics} />
+<MetricChips data={metrics ?? undefined} />
 <button onClick={()=>run('auto')} className="badge border-accent bg-accent/30">질문 (Auto)</button>
 </div>
 </div>

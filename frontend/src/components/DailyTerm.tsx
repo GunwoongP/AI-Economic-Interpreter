@@ -63,11 +63,13 @@ export default function DailyTerm() {
     refetchOnWindowFocus: false,
     retry: 1,
     staleTime: Infinity,
-    onSuccess: (payload) => {
-      setTerms((prev) => (prev[index] ? prev : { ...prev, [index]: payload }));
-      setTotalCount((prev) => prev ?? payload.total);
-    },
   });
+
+  useEffect(() => {
+    if (!data) return;
+    setTerms((prev) => (prev[index] ? prev : { ...prev, [index]: data }));
+    setTotalCount((prev) => prev ?? data.total);
+  }, [data, index]);
 
   const current = terms[index] ?? data ?? null;
   const effectiveTotal = totalCount ?? current?.total ?? null;

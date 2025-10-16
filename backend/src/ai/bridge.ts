@@ -1,6 +1,6 @@
 import type { Card, Role, SeriesResp } from '../types.js';
 import { localGenerate, ChatMsg } from './provider_local.js';
-import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt, marketSummaryPrompt } from './prompts.js';
+import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt, marketSummaryPrompt, type PromptEvidence } from './prompts.js';
 
 export type AskRole = 'eco' | 'firm' | 'house';
 
@@ -33,7 +33,14 @@ function resolveLoraName(role: Role): string | undefined {
   return undefined;
 }
 
-type Evidence = { text: string; meta?: any; sim?: number };
+export type Evidence = {
+  text: string;
+  meta?: any;
+  sim?: number;
+  label?: string;
+  source?: string;
+  date?: string;
+};
 export interface InsightSnippet {
   title: string;
   lines: string[];
@@ -134,12 +141,30 @@ export async function genDraft(
   const previousCards = opts.previous?.slice(-3);
   const temperature = opts.temperature ?? 0.2;
 
-  const msgs = draftPrompt(
-    role as any,
-    q,
-    evidences.map((e) => e.text),
-    previousCards,
-  ) as ChatMsg[];
+  const promptEvidences: PromptEvidence[] = evidences.slice(0, 2).map((e, idx) => {
+    const meta = (e.meta && typeof e.meta === 'object') ? (e.meta as Record<string, unknown>) : {};
+    const sourceCandidate =
+      e.source && e.source.trim().length
+        ? e.source.trim()
+        : (typeof meta.title === 'string' && meta.title.trim().length
+            ? meta.title.trim()
+            : typeof meta.source === 'string' && meta.source.trim().length
+            ? meta.source.trim()
+            : undefined);
+    const dateCandidate = e.date && e.date.trim().length
+      ? e.date.trim()
+      : typeof meta.date === 'string' && meta.date.trim().length
+      ? meta.date.trim()
+      : undefined;
+    return {
+      label: e.label ?? `RAG#${idx + 1}`,
+      text: e.text,
+      source: sourceCandidate,
+      date: dateCandidate,
+    };
+  });
+
+  const msgs = draftPrompt(role as any, q, promptEvidences, previousCards) as ChatMsg[];
   const { content } = await localGenerate(role, msgs, {
     max_tokens: 600,
     temperature,
@@ -157,10 +182,10 @@ export async function genDraft(
         : '가계 프레임',
     content: cleaned,
     conf: 0.7,
-    sources: evidences.slice(0, 3).map((e) => ({
-      title: 'RAG',
-      date: e.meta?.date,
-      score: e.sim,
+    sources: promptEvidences.map((item, idx) => ({
+      title: item.source ? `${item.label} ${item.source}` : item.label,
+      date: item.date,
+      score: evidences[idx]?.sim,
     })),
   };
 }

@@ -9,7 +9,7 @@ import ModeSelector from '@/components/ModeSelector';
 import HistoryPanel from '@/components/HistoryPanel';
 import { useAskStream } from '@/hooks/useAskStream';
 import { getDailyInsight, getSeries } from '@/lib/api';
-import type { Mode, Role, SeriesResp } from '@/lib/types';
+import type { Mode, Role, SeriesResp, NewsItem } from '@/lib/types';
 import {
   loadHistory,
   saveHistoryItem,
@@ -40,164 +40,16 @@ const ROLE_THEME: Record<
     icon: '🔵',
     badgeClass: 'border-[#4AA3FF]/40 bg-[#4AA3FF]/15 text-text',
   },
+  combined: {
+    label: '통합요약',
+    description: '세 전문가의 의견을 묶은 최종 해석입니다.',
+    icon: '🟢',
+    badgeClass: 'border-border/50 bg-chip/70 text-text',
+  },
 };
 
 const ROLE_ORDER: Role[] = ['eco', 'firm', 'house'];
 
-const DEFAULT_INSIGHT_LABEL = '오늘의 해설';
-const DEFAULT_KOSPI_INSIGHT = {
-  title: '외국인 차익실현이 코스피를 눌렀어요',
-  lines: [
-    '원·달러 환율이 다시 1,380원대에 진입하며 외국인과 기관이 동반 순매도로 전환했습니다.',
-    '반도체 단가 조정 뉴스가 전해지며 반도체 업종 전반에 약세가 번졌습니다.',
-  ],
-} as const;
-const DEFAULT_IXIC_INSIGHT = {
-  title: 'AI 성장주가 나스닥 상승을 이끌었어요',
-  lines: [
-    '미 국채 금리가 진정되자 기술주로 자금이 빠르게 회귀했습니다.',
-    '엔비디아와 메가테크 실적 기대감이 살아나면서 투자 심리가 개선되었습니다.',
-  ],
-} as const;
-
-type TrendTone = 'up' | 'down' | 'flat';
-type TrendMeta = {
-  icon: string;
-  direction: '상승' | '하락' | '보합';
-};
-type TrendInfo = {
-  tone: TrendTone;
-  icon: string;
-  direction: TrendMeta['direction'];
-  changeText: string;
-};
-
-const TREND_MAP: Record<TrendTone, TrendMeta> = {
-  up: { icon: '▲', direction: '상승' },
-  down: { icon: '▼', direction: '하락' },
-  flat: { icon: '●', direction: '보합' },
-};
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function computeTrendInfo(series?: SeriesResp | null): TrendInfo | null {
-  if (!series || !Array.isArray(series.values) || series.values.length === 0) {
-    return null;
-  }
-  const lastPoint = series.values[series.values.length - 1];
-  const prevPoint = series.values.length > 1 ? series.values[series.values.length - 2] : lastPoint;
-  const delta = lastPoint.close - prevPoint.close;
-  const pct = prevPoint.close === 0 ? 0 : (delta / prevPoint.close) * 100;
-  let tone: TrendTone = 'flat';
-  if (delta > 0) {
-    tone = 'up';
-  } else if (delta < 0) {
-    tone = 'down';
-  }
-  const meta = TREND_MAP[tone];
-  const changeText =
-    tone === 'flat'
-      ? `${delta.toFixed(2)}p (${pct.toFixed(2)}%)`
-      : `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}p (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`;
-  return {
-    tone,
-    icon: meta.icon,
-    direction: meta.direction,
-    changeText,
-  };
-}
-
-type InsightSource = {
-  title?: string | null;
-  lines?: string[] | null;
-} | null;
-
-function buildInsight({
-  market,
-  label,
-  primary,
-  fallback,
-  series,
-}: {
-  market: '코스피' | '나스닥';
-  label: string;
-  primary: InsightSource;
-  fallback: { title: string; lines: readonly string[] };
-  series?: SeriesResp | null;
-}) {
-  const primaryLines = Array.isArray(primary?.lines) ? primary?.lines ?? [] : [];
-  const normalizedPrimaryLines = primaryLines
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const fallbackLines = [...fallback.lines];
-  const safeLines = normalizedPrimaryLines.length ? normalizedPrimaryLines : fallbackLines;
-
-  const primaryTitle = primary?.title?.trim() || '';
-  const fallbackTitle = fallback.title.trim();
-  const primaryLinesKey = normalizedPrimaryLines.join('');
-  const fallbackLinesKey = fallbackLines.map((line) => line.trim()).filter(Boolean).join('');
-  const isFallbackPayload =
-    !primary ||
-    (!primaryTitle && !normalizedPrimaryLines.length) ||
-    (primaryTitle === fallbackTitle && primaryLinesKey === fallbackLinesKey);
-
-  const rawTitle = (primaryTitle || fallbackTitle).slice(0, 80);
-  const sanitizedTitle = rawTitle.replace(/\s+/g, ' ').trim();
-
-  const trend = computeTrendInfo(series);
-  const marketPrefix = new RegExp(`^${escapeRegExp(market)}\s*(상승|하락|보합)?\s*[·:\-]?\s*`, 'i');
-  const strippedTitle = sanitizedTitle.replace(/^[▲▼●]\s*/, '');
-  const body = strippedTitle.replace(marketPrefix, '').trim();
-  const normalizedBody = body.replace(/\s+/g, ' ').trim();
-  const normalizedChange = trend?.changeText ? trend.changeText.replace(/\s+/g, ' ').trim() : '';
-  const bodyWithoutDirection = normalizedBody.replace(/^(상승세|약세|보합권|상승|하락|보합)\s*[·:\-]?\s*/i, '').trim();
-  const bodyCore = bodyWithoutDirection.replace(/^[+▲▼●]\s*/, '').trim();
-  const isBodyOnlyChange = !bodyCore || bodyCore === normalizedChange;
-  const shouldKeepBody = Boolean(primaryTitle) && !isFallbackPayload && !isBodyOnlyChange;
-
-  const lines: string[] = [];
-  const seen = new Set<string>();
-  const pushLine = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed || seen.has(trimmed)) return;
-    seen.add(trimmed);
-    lines.push(trimmed);
-  };
-
-  if (shouldKeepBody) {
-    pushLine(body);
-  }
-  safeLines.forEach((line) => pushLine(line));
-  if (!lines.length) {
-    pushLine(sanitizedTitle);
-  }
-  const description = lines.join('');
-
-  if (!trend) {
-    return {
-      label,
-      title: sanitizedTitle,
-      description,
-    };
-  }
-
-  const headlineParts = [`${market} ${trend.direction}`];
-  if (trend.changeText) {
-    headlineParts.push(trend.changeText);
-  }
-  const decoratedTitle = `${trend.icon} ${headlineParts.join(' · ')}` + (shouldKeepBody ? ` · ${body}` : '');
-
-  return {
-    label,
-    title: decoratedTitle,
-    description,
-    tone: trend.tone,
-    icon: trend.icon,
-  };
-}
 function useSeries(symbol: SeriesResp['symbol']) {
   return useQuery({
     queryKey: ['series', symbol],
@@ -280,31 +132,69 @@ export default function Page() {
     ? rolesFromMeta.filter((role) => (cardsByRole[role] ?? []).length > 0)
     : rolesWithCards;
   const dailyData = dailyInsight.data;
-  const insightLabel = dailyData?.insights?.label?.trim() || DEFAULT_INSIGHT_LABEL;
+  const newsBuckets = dailyData?.news;
+  const domesticNews = (newsBuckets?.domestic ?? []).slice(0, 5);
+  const globalNews = (newsBuckets?.global ?? []).slice(0, 5);
+  const fallbackNews = (newsBuckets?.combined ?? [...domesticNews, ...globalNews]).slice(0, 5);
 
-  const kospiInsight = useMemo(
-    () =>
-      buildInsight({
-        market: '코스피',
-        label: insightLabel,
-        primary: dailyData?.insights?.kospi ?? null,
-        fallback: DEFAULT_KOSPI_INSIGHT,
-        series: dailyData?.series?.kospi ?? kospi.data ?? null,
-      }),
-    [dailyData, insightLabel, kospi.data],
+  const NewsList = ({
+    title,
+    items,
+    emptyMessage,
+  }: {
+    title: string;
+    items: NewsItem[];
+    emptyMessage: string;
+  }) => (
+    <div className="rounded-3xl border border-border/60 bg-chip/75 p-5 text-sm shadow-soft">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text">{title}</h3>
+        <span className="text-xs text-muted">{items.length > 0 ? `${items.length}건` : ''}</span>
+      </div>
+      {items.length > 0 ? (
+        <ul className="mt-2 space-y-2 text-sm text-muted">
+          {items.map((item, index) => {
+            const headline = (item.title || item.description || '').trim() || '제목 없음';
+            const href = item.link || item.originallink;
+            return (
+              <li key={`${title}-${index}`}>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition hover:text-text hover:underline"
+                  >
+                    {headline}
+                  </a>
+                ) : (
+                  <span>{headline}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-muted">{emptyMessage}</p>
+      )}
+    </div>
   );
 
-  const ixicInsight = useMemo(
-    () =>
-      buildInsight({
-        market: '나스닥',
-        label: insightLabel,
-        primary: dailyData?.insights?.ixic ?? null,
-        fallback: DEFAULT_IXIC_INSIGHT,
-        series: dailyData?.series?.ixic ?? ixic.data ?? null,
-      }),
-    [dailyData, insightLabel, ixic.data],
-  );
+  const kospiSeriesData = kospi.data ?? dailyData?.series?.kospi ?? null;
+  const ixicSeriesData = ixic.data ?? dailyData?.series?.ixic ?? null;
+  const insightLabel = dailyData?.insights?.label ?? '오늘의 해설';
+  const buildInsight = (snippet?: { title: string; lines: string[] } | null) => {
+    if (!snippet) return undefined;
+    const lines = Array.isArray(snippet.lines) ? snippet.lines.filter(Boolean) : [];
+    const description = lines.join(' · ').slice(0, 180);
+    return {
+      label: insightLabel,
+      title: snippet.title,
+      description,
+    };
+  };
+  const kospiInsight = buildInsight(dailyData?.insights?.kospi ?? null);
+  const ixicInsight = buildInsight(dailyData?.insights?.ixic ?? null);
 
   const tileClass = 'rounded-3xl border border-border/60 bg-panel/90 p-5 text-sm shadow-soft backdrop-blur';
   const sampleQuestions = [
@@ -349,13 +239,42 @@ export default function Page() {
           <h2 className="text-xl font-semibold text-text md:text-2xl">오늘 시장 한눈에</h2>
         </header>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {kospi.isError && <div className={`${tileClass} text-bad`}>KOSPI 데이터를 불러오지 못했습니다.</div>}
-          {kospi.isLoading && !kospi.data && <div className={`${tileClass} text-muted`}>KOSPI 로드 중…</div>}
-          {kospi.data && <SparkChart data={kospi.data} title="KOSPI (3개월)" insight={kospiInsight} />}
+          {kospiSeriesData ? (
+            <SparkChart data={kospiSeriesData} title="KOSPI (3개월)" insight={kospiInsight} />
+          ) : kospi.isError ? (
+            <div className={`${tileClass} text-bad`}>KOSPI 데이터를 불러오지 못했습니다.</div>
+          ) : (
+            <div className={`${tileClass} text-muted`}>KOSPI 로드 중…</div>
+          )}
 
-          {ixic.isError && <div className={`${tileClass} text-bad`}>NASDAQ 데이터를 불러오지 못했습니다.</div>}
-          {ixic.isLoading && !ixic.data && <div className={`${tileClass} text-muted`}>NASDAQ 로드 중…</div>}
-          {ixic.data && <SparkChart data={ixic.data} title="NASDAQ (3개월)" insight={ixicInsight} />}
+          {ixicSeriesData ? (
+            <SparkChart data={ixicSeriesData} title="NASDAQ (3개월)" insight={ixicInsight} />
+          ) : ixic.isError ? (
+            <div className={`${tileClass} text-bad`}>NASDAQ 데이터를 불러오지 못했습니다.</div>
+          ) : (
+            <div className={`${tileClass} text-muted`}>NASDAQ 로드 중…</div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <NewsList
+            title="국내 헤드라인"
+            items={domesticNews}
+            emptyMessage="국내 주요 뉴스를 불러오지 못했습니다."
+          />
+          <NewsList
+            title="해외 헤드라인"
+            items={globalNews}
+            emptyMessage="해외 주요 뉴스를 불러오지 못했습니다."
+          />
+          {fallbackNews.length > 0 && (domesticNews.length === 0 || globalNews.length === 0) && (
+            <div className="md:col-span-2">
+              <NewsList
+                title="오늘의 주요 헤드라인"
+                items={fallbackNews}
+                emptyMessage="표시할 헤드라인이 없습니다."
+              />
+            </div>
+          )}
         </div>
       </section>
 

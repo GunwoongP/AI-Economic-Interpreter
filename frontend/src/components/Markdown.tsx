@@ -44,7 +44,7 @@ const components: Components = {
       {children}
     </a>
   ),
-  code: ({ inline, children, ...props }) =>
+  code: ({ inline, children, ...props }: any) =>
     inline ? (
       <code className="rounded bg-chip/60 px-1.5 py-[1px] font-mono text-[12px] text-accent" {...props}>
         {children}
