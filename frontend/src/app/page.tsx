@@ -8,8 +8,8 @@ import Card from '@/components/Card';
 import ModeSelector from '@/components/ModeSelector';
 import HistoryPanel from '@/components/HistoryPanel';
 import { useAskStream } from '@/hooks/useAskStream';
-import { getSeries } from '@/lib/api';
-import type { Mode, Role, SeriesResp } from '@/lib/types';
+import { getDailyInsight, getSeries } from '@/lib/api';
+import type { Mode, Role, SeriesResp, NewsItem } from '@/lib/types';
 import {
   loadHistory,
   saveHistoryItem,
@@ -40,6 +40,12 @@ const ROLE_THEME: Record<
     icon: '🔵',
     badgeClass: 'border-[#4AA3FF]/40 bg-[#4AA3FF]/15 text-text',
   },
+  combined: {
+    label: '통합요약',
+    description: '세 전문가의 의견을 묶은 최종 해석입니다.',
+    icon: '🟢',
+    badgeClass: 'border-border/50 bg-chip/70 text-text',
+  },
 };
 
 const ROLE_ORDER: Role[] = ['eco', 'firm', 'house'];
@@ -50,6 +56,15 @@ function useSeries(symbol: SeriesResp['symbol']) {
     queryFn: () => getSeries(symbol),
     retry: 1,
     staleTime: 1000 * 60 * 15,
+  });
+}
+
+function useDailyInsightData() {
+  return useQuery({
+    queryKey: ['daily-insight'],
+    queryFn: () => getDailyInsight({ limit: 6 }),
+    retry: 1,
+    staleTime: 1000 * 60 * 10,
   });
 }
 
@@ -64,6 +79,7 @@ export default function Page() {
 
   const kospi = useSeries('KOSPI');
   const ixic = useSeries('IXIC');
+  const dailyInsight = useDailyInsightData();
 
   const askStream = useAskStream((result) => {
     const question = latestQ.current;
@@ -115,17 +131,72 @@ export default function Page() {
   const visibleRoles = rolesFromMeta.length
     ? rolesFromMeta.filter((role) => (cardsByRole[role] ?? []).length > 0)
     : rolesWithCards;
+  const dailyData = dailyInsight.data;
+  const newsBuckets = dailyData?.news;
+  const domesticNews = (newsBuckets?.domestic ?? []).slice(0, 5);
+  const globalNews = (newsBuckets?.global ?? []).slice(0, 5);
+  const fallbackNews = (newsBuckets?.combined ?? [...domesticNews, ...globalNews]).slice(0, 5);
+
+  const NewsList = ({
+    title,
+    items,
+    emptyMessage,
+  }: {
+    title: string;
+    items: NewsItem[];
+    emptyMessage: string;
+  }) => (
+    <div className="rounded-3xl border border-border/60 bg-chip/75 p-5 text-sm shadow-soft">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text">{title}</h3>
+        <span className="text-xs text-muted">{items.length > 0 ? `${items.length}건` : ''}</span>
+      </div>
+      {items.length > 0 ? (
+        <ul className="mt-2 space-y-2 text-sm text-muted">
+          {items.map((item, index) => {
+            const headline = (item.title || item.description || '').trim() || '제목 없음';
+            const href = item.link || item.originallink;
+            return (
+              <li key={`${title}-${index}`}>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition hover:text-text hover:underline"
+                  >
+                    {headline}
+                  </a>
+                ) : (
+                  <span>{headline}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-muted">{emptyMessage}</p>
+      )}
+    </div>
+  );
+
+  const kospiSeriesData = kospi.data ?? dailyData?.series?.kospi ?? null;
+  const ixicSeriesData = ixic.data ?? dailyData?.series?.ixic ?? null;
+  const insightLabel = dailyData?.insights?.label ?? '오늘의 해설';
+  const buildInsight = (snippet?: { title: string; lines: string[] } | null) => {
+    if (!snippet) return undefined;
+    const lines = Array.isArray(snippet.lines) ? snippet.lines.filter(Boolean) : [];
+    const description = lines.join(' · ').slice(0, 180);
+    return {
+      label: insightLabel,
+      title: snippet.title,
+      description,
+    };
+  };
+  const kospiInsight = buildInsight(dailyData?.insights?.kospi ?? null);
+  const ixicInsight = buildInsight(dailyData?.insights?.ixic ?? null);
+
   const tileClass = 'rounded-3xl border border-border/60 bg-panel/90 p-5 text-sm shadow-soft backdrop-blur';
-  const kospiInsight = {
-    title: '외국인 차익실현이 코스피를 눌렀어요',
-    description:
-      '원·달러 환율이 다시 1,380원대에 진입하며 외국인과 기관이 동반 순매도로 전환했습니다. 반도체 단가 조정 뉴스가 전해지며 업종 전반에 약세가 번진 하루였습니다.',
-  };
-  const ixicInsight = {
-    title: 'AI 성장주가 나스닥 상승을 이끌었어요',
-    description:
-      '미 국채 금리가 진정되자 기술주로 자금이 빠르게 회귀했습니다. 엔비디아와 메가테크 실적 기대감이 살아나면서 투자 심리가 개선된 것이 지수 상승을 뒷받침했습니다.',
-  };
   const sampleQuestions = [
     '금리가 오르면 내 대출 이자는 어떻게 변할까요?',
     '한국 증시가 하락하면 기업 입장에서는 어떤 전략을 쓰나요?',
@@ -168,13 +239,42 @@ export default function Page() {
           <h2 className="text-xl font-semibold text-text md:text-2xl">오늘 시장 한눈에</h2>
         </header>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {kospi.isError && <div className={`${tileClass} text-bad`}>KOSPI 데이터를 불러오지 못했습니다.</div>}
-          {kospi.isLoading && !kospi.data && <div className={`${tileClass} text-muted`}>KOSPI 로드 중…</div>}
-          {kospi.data && <SparkChart data={kospi.data} title="KOSPI (3개월)" insight={kospiInsight} />}
+          {kospiSeriesData ? (
+            <SparkChart data={kospiSeriesData} title="KOSPI (3개월)" insight={kospiInsight} />
+          ) : kospi.isError ? (
+            <div className={`${tileClass} text-bad`}>KOSPI 데이터를 불러오지 못했습니다.</div>
+          ) : (
+            <div className={`${tileClass} text-muted`}>KOSPI 로드 중…</div>
+          )}
 
-          {ixic.isError && <div className={`${tileClass} text-bad`}>NASDAQ 데이터를 불러오지 못했습니다.</div>}
-          {ixic.isLoading && !ixic.data && <div className={`${tileClass} text-muted`}>NASDAQ 로드 중…</div>}
-          {ixic.data && <SparkChart data={ixic.data} title="NASDAQ (3개월)" insight={ixicInsight} />}
+          {ixicSeriesData ? (
+            <SparkChart data={ixicSeriesData} title="NASDAQ (3개월)" insight={ixicInsight} />
+          ) : ixic.isError ? (
+            <div className={`${tileClass} text-bad`}>NASDAQ 데이터를 불러오지 못했습니다.</div>
+          ) : (
+            <div className={`${tileClass} text-muted`}>NASDAQ 로드 중…</div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <NewsList
+            title="국내 헤드라인"
+            items={domesticNews}
+            emptyMessage="국내 주요 뉴스를 불러오지 못했습니다."
+          />
+          <NewsList
+            title="해외 헤드라인"
+            items={globalNews}
+            emptyMessage="해외 주요 뉴스를 불러오지 못했습니다."
+          />
+          {fallbackNews.length > 0 && (domesticNews.length === 0 || globalNews.length === 0) && (
+            <div className="md:col-span-2">
+              <NewsList
+                title="오늘의 주요 헤드라인"
+                items={fallbackNews}
+                emptyMessage="표시할 헤드라인이 없습니다."
+              />
+            </div>
+          )}
         </div>
       </section>
 
@@ -304,7 +404,8 @@ export default function Page() {
 
             <div className="space-y-5">
               {conversation.length > 0 ? (
-                conversation.map((turn, idx) => {
+                [...conversation].reverse().map((turn, idx) => {
+                  const displayNumber = conversation.length - idx;
                   const groups = ROLE_ORDER.map((role) => ({
                     role,
                     cards: (turn.answer.cards || []).filter((card) => card.type === role),
@@ -317,7 +418,7 @@ export default function Page() {
                     >
                       <header className="space-y-2">
                         <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted">
-                          <span>질문 {idx + 1}</span>
+                          <span>질문 {displayNumber}</span>
                           <span>·</span>
                           <span>{new Date(turn.askedAt).toLocaleString()}</span>
                         </div>

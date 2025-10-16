@@ -1,6 +1,7 @@
 import type { Card as TCard } from '@/lib/types';
 import InsightCard from './InsightCard';
 import { CardSources } from './CardSources';
+import { Markdown } from './Markdown';
 
 type Variant = 'default' | 'flat';
 
@@ -11,6 +12,7 @@ const ROLE_TAG: Record<
   eco: { label: '경제해석', icon: '🟣', className: 'border-[#7C8FFF]/40 bg-[#7C8FFF]/12 text-text' },
   firm: { label: '기업분석', icon: '🟠', className: 'border-[#FF8A3D]/40 bg-[#FF8A3D]/12 text-text' },
   house: { label: '가계조언', icon: '🔵', className: 'border-[#4AA3FF]/40 bg-[#4AA3FF]/12 text-text' },
+  combined: { label: '통합요약', icon: '🟢', className: 'border-border/40 bg-chip/70 text-text' },
 };
 
 export default function Card({ c, variant = 'default' }: { c: TCard; variant?: Variant }) {
@@ -25,7 +27,7 @@ export default function Card({ c, variant = 'default' }: { c: TCard; variant?: V
       <article className="space-y-4 text-sm text-muted">
         <div className="space-y-2">
           <h3 className="text-base font-semibold text-text">{c.title}</h3>
-          {c.content && <p className="leading-relaxed text-muted">{c.content}</p>}
+          {c.content && <Markdown>{c.content}</Markdown>}
         </div>
 
         {Array.isArray(c.badges) && c.badges.length > 0 && (
@@ -79,7 +81,7 @@ export default function Card({ c, variant = 'default' }: { c: TCard; variant?: V
 
       <div className="space-y-3">
         <h3 className="text-base font-semibold text-text">{c.title}</h3>
-        {c.content && <p className="text-sm leading-relaxed text-muted">{c.content}</p>}
+        {c.content && <Markdown className="text-muted">{c.content}</Markdown>}
       </div>
 
       {Array.isArray(c.points) && c.points.length > 0 && (

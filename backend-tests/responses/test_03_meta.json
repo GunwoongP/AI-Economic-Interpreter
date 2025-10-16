@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "question": "가계부채 관리 전략 알려줘",
+  "response_file": "/tmp/backend-tests/test_03.json"
+}

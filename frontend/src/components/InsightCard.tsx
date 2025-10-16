@@ -1,5 +1,6 @@
 import type { Card as TCard } from '@/lib/types';
 import { CardSources } from './CardSources';
+import { Markdown } from './Markdown';
 
 type Props = { card: TCard };
 
@@ -7,18 +8,10 @@ const VARIANT: Record<TCard['type'], string> = {
   eco: 'from-sky-500/20 via-cyan-500/15 to-slate-500/5',
   firm: 'from-orange-500/20 via-amber-500/10 to-rose-500/5',
   house: 'from-blue-500/15 via-emerald-500/10 to-lime-500/5',
+  combined: 'from-accent/25 via-accent/10 to-slate-500/5',
 };
 
-function splitContent(content?: string) {
-  if (!content) return [];
-  return content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
 export default function InsightCard({ card }: Props) {
-  const parts = splitContent(card.content);
   const variant = VARIANT[card.type] || 'from-accent/20 to-accent/5';
   const heading = card.type === 'eco' ? '거시 핵심' : '핵심 인사이트';
 
@@ -31,11 +24,11 @@ export default function InsightCard({ card }: Props) {
             <h3 className="text-base font-semibold">{card.title}</h3>
           </div>
         </div>
-        <div className="mt-2 space-y-2 text-sm leading-relaxed">
-          {parts.map((line, idx) => (
-            <p key={`${card.title}-${idx}`}>{line}</p>
-          ))}
-        </div>
+        {card.content && (
+          <div className="mt-2">
+            <Markdown className="text-text">{card.content}</Markdown>
+          </div>
+        )}
       </div>
 
       {Array.isArray(card.points) && card.points.length > 0 && (

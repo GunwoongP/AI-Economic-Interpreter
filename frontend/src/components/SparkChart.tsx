@@ -12,14 +12,20 @@ import {
 } from 'recharts';
 import type { SeriesResp } from '@/lib/types';
 
+type InsightTone = 'up' | 'down' | 'flat';
+
+type InsightPayload = {
+  label?: string;
+  title: string;
+  description: string;
+  tone?: InsightTone;
+  icon?: string;
+};
+
 type Props = {
   data: SeriesResp;
   title?: string;
-  insight?: {
-    label?: string;
-    title: string;
-    description: string;
-  };
+  insight?: InsightPayload;
 };
 
 function formatLabel(ts: number) {
@@ -31,11 +37,11 @@ function formatFull(ts: number) {
   return new Date(ts).toLocaleString('ko-KR', { month: 'short', day: 'numeric' });
 }
 
-const toneMap = {
+const toneMap: Record<InsightTone, { icon: string; badge: string }> = {
   up: { icon: '▲', badge: 'border border-good/40 bg-good/15 text-good' },
   down: { icon: '▼', badge: 'border border-bad/40 bg-bad/15 text-bad' },
   flat: { icon: '●', badge: 'border border-muted/40 bg-muted/10 text-muted' },
-} as const;
+};
 
 export default function SparkChart({ data, title, insight }: Props) {
   const prepared = useMemo(() => {
@@ -68,10 +74,11 @@ export default function SparkChart({ data, title, insight }: Props) {
   if (!prepared) return null;
 
   const { chartData, stats, color } = prepared;
-  const toneKey = stats.dailyDelta > 0 ? 'up' : stats.dailyDelta < 0 ? 'down' : 'flat';
-  const trendIcon = toneKey === 'up' ? '▲' : toneKey === 'down' ? '▼' : '●';
-  const pctText = `${trendIcon} ${Math.abs(stats.dailyPct).toFixed(2)}%`;
+  const fallbackToneKey: InsightTone = stats.dailyDelta > 0 ? 'up' : stats.dailyDelta < 0 ? 'down' : 'flat';
+  const toneKey: InsightTone = insight?.tone ?? fallbackToneKey;
   const tone = toneMap[toneKey];
+  const badgeIcon = insight?.icon ?? tone.icon;
+  const pctText = `${badgeIcon} ${Math.abs(stats.dailyPct).toFixed(2)}%`;
   const pctColorClass = toneKey === 'up' ? 'text-emerald-500' : toneKey === 'down' ? 'text-red-500' : 'text-muted';
   const insightLabel = insight?.label ?? '오늘의 해설';
 
@@ -146,7 +153,7 @@ export default function SparkChart({ data, title, insight }: Props) {
         <div className="rounded-2xl border border-border/60 bg-chip/70 p-4 text-sm leading-relaxed text-muted shadow-inner">
           <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted/70">
             <span className={`inline-flex h-7 w-7 items-center justify-center rounded-xl ${tone.badge} text-sm`}>
-              {tone.icon}
+              {badgeIcon}
             </span>
             <span>{insightLabel}</span>
           </div>

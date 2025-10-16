@@ -4,7 +4,10 @@ import type { SeriesResp } from '@/lib/types';
 type SymbolKey = SeriesResp['symbol'];
 
 const ALLOWED_SYMBOLS: SymbolKey[] = ['KOSPI', 'IXIC'];
-const DEFAULT_BACKEND = process.env.MARKET_API_BASE ?? 'http://127.0.0.1:8000';
+const DEFAULT_BACKEND =
+  process.env.MARKET_API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE ??
+  'http://127.0.0.1:3001';
 
 function validateSymbol(input: string | null): SymbolKey {
   const symbol = (input || 'KOSPI') as SymbolKey;
@@ -19,7 +22,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const symbol = validateSymbol(searchParams.get('symbol'));
 
-    const upstream = `${DEFAULT_BACKEND.replace(/\/+$/, '')}/series/${symbol}`;
+    const upstreamBase = DEFAULT_BACKEND.replace(/\/+$/, '');
+    const upstream = `${upstreamBase}/timeseries?symbol=${symbol}`;
     const res = await fetch(upstream, { cache: 'no-store' });
 
     if (!res.ok) {

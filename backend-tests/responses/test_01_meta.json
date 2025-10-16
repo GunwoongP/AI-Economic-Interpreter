@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "question": "현재 한국 금리 전망 알려줘",
+  "response_file": "/tmp/backend-tests/test_01.json"
+}

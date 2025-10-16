@@ -1,52 +1,52 @@
-import os, torch
-from fastapi import FastAPI
-from pydantic import BaseModel
-import uvicorn
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from __future__ import annotations
+import os, signal, sys
+from multiprocessing import Process
+from typing import Dict
+from server_base import run_server, register_rbln_loras
 
-MODEL_ID = os.environ.get("MODEL_ID", "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct")
-TEMP = float(os.environ.get("TEMP", "0.2"))
-MAX_NEW = int(os.environ.get("MAX_NEW", "512"))
+ROLE_PORTS = {
+    "eco": 8001,
+    "firm": 8002,
+    "house": 8003,
+}
 
-print(f"Loading tokenizer for {MODEL_ID}...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True, use_fast=True)
+def main():
+    # 🔧 등록: 멀티 LoRA 어댑터 (이름: 경로)
+    register_rbln_loras({
+        "eco": "./lora/eco_adapter",
+        "firm": "./lora/firm_adapter",
+        "house": "./lora/house_adapter",
+    })
 
-print(f"Loading model {MODEL_ID}...")
-load_kwargs = dict(trust_remote_code=True)
-if torch.cuda.is_available():
-    load_kwargs.update(dict(torch_dtype=torch.float16, device_map="auto"))
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
-print("Model loaded successfully.")
+    procs: Dict[str, Process] = {}
 
-app = FastAPI()
+    def shutdown(_sig=None, _frm=None):
+        print("[AI-Main] Shutting down...")
+        for p in procs.values():
+            if p.is_alive():
+                p.terminate()
+        sys.exit(0)
 
-class ChatIn(BaseModel):
-    messages: list[dict]   # [{role:'system'|'user'|'assistant', content:str}]
-    max_tokens: int = MAX_NEW
-    temperature: float = TEMP
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
 
-def to_prompt(msgs):
-    sys = next((m["content"] for m in msgs if m.get("role")=="system"), "")
-    users = "\n\n".join([m["content"] for m in msgs if m.get("role")=="user"])
-    # EXAONE/인스트럭션 계열에 잘 먹는 간단 포맷
-    return (f"[SYSTEM]\n{sys}\n\n" if sys else "") + f"[USER]\n{users}\n\n[ASSISTANT]\n"
+    default_model_id = os.environ.get("MODEL_ID", "Qwen3-0.6B")
+    backend = os.environ.get("MODEL_BACKEND", "rbln")
 
-@app.post("/chat")
-def chat(inp: ChatIn):
-    prompt = to_prompt(inp.messages)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    out = model.generate(
-        **inputs,
-        max_new_tokens=inp.max_tokens,
-        temperature=inp.temperature,
-        do_sample=inp.temperature > 0,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    text = tokenizer.decode(out[0], skip_special_tokens=True)
-    # 프롬프트 부분 제거
-    resp = text[len(prompt):].strip()
-    return {"content": resp}
+    for role, port in ROLE_PORTS.items():
+        role_env_key = f"{role.upper()}_MODEL_ID"
+        model_id = os.environ.get(role_env_key, default_model_id)
+        p = Process(
+            target=run_server,
+            args=(role, port, model_id),
+            kwargs={"temperature": 0.2, "max_tokens": 2048, "backend": backend},
+        )
+        p.start()
+        procs[role] = p
+        print(f"[AI-Main] launched {role} on {port}")
+
+    for p in procs.values():
+        p.join()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT","8008")))
+    main()
