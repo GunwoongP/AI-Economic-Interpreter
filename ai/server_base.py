@@ -1,11 +1,13 @@
 from __future__ import annotations
 import os, json, time
 from pathlib import Path
+from threading import Thread
 from typing import Any, Iterable, Tuple
-import torch, uvicorn
+import torch
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ValidationError
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 try:
     from peft import PeftModel
@@ -88,6 +90,7 @@ def build_app(
         add_prompt = not msgs or msgs[-1]["role"] != "assistant"
         prompt = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=add_prompt)
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        prompt_len = int(inputs["input_ids"].shape[-1])
 
         # 🔧 RBLN 백엔드의 LoRA hot-swap 처리
         if backend == "rbln" and data.lora_name:
@@ -101,17 +104,94 @@ def build_app(
             else:
                 print(f"[AI-WARN] Unknown lora_name={data.lora_name}, base model only.")
 
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=data.max_tokens,
-                temperature=data.temperature,
-                do_sample=data.temperature > 0,
-                eos_token_id=tokenizer.eos_token_id,
-                pad_token_id=tokenizer.eos_token_id,
+        metrics: dict[str, Any] = {"prompt_tokens": prompt_len}
+        t_start = time.perf_counter()
+
+        base_kwargs = dict(
+            **inputs,
+            max_new_tokens=data.max_tokens,
+            temperature=data.temperature,
+            do_sample=data.temperature > 0,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+        try:
+            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+            stream_kwargs = {**base_kwargs, "streamer": streamer}
+            pieces: list[str] = []
+            first_token_at: float | None = None
+
+            def _run_generate():
+                with torch.no_grad():
+                    model.generate(**stream_kwargs)
+
+            worker = Thread(target=_run_generate)
+            worker.start()
+            try:
+                for piece in streamer:
+                    if not piece:
+                        continue
+                    now = time.perf_counter()
+                    if first_token_at is None:
+                        first_token_at = now
+                    pieces.append(piece)
+            finally:
+                worker.join()
+
+            generated_text = "".join(pieces).strip()
+            t_end = time.perf_counter()
+
+            total_ms = (t_end - t_start) * 1000.0
+            ttft_ms = ((first_token_at - t_start) * 1000.0) if first_token_at else total_ms
+            decode_ms = ((t_end - first_token_at) * 1000.0) if first_token_at else total_ms
+
+            metrics.update(
+                {
+                    "ttft_ms": ttft_ms,
+                    "decode_ms": decode_ms,
+                    "total_ms": total_ms,
+                }
             )
-        text = tokenizer.decode(out[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
-        return {"content": text.strip()}
+
+            if generated_text:
+                gen_ids = tokenizer(
+                    generated_text,
+                    add_special_tokens=False,
+                    return_tensors="pt",
+                )["input_ids"][0]
+                gen_tokens = int(gen_ids.shape[-1])
+            else:
+                gen_tokens = 0
+            metrics["tokens"] = gen_tokens
+            decode_sec = (decode_ms / 1000.0) if decode_ms else (total_ms / 1000.0)
+            if decode_sec and decode_sec > 0:
+                metrics["tps"] = gen_tokens / decode_sec
+
+            return {"content": generated_text, "metrics": metrics}
+        except Exception as err:
+            print(f"[AI-WARN] Streaming generation failed ({err}); reverting to blocking mode.")
+            with torch.no_grad():
+                out = model.generate(**base_kwargs)
+            generated = out[0]
+            generated_text = tokenizer.decode(
+                generated[prompt_len:], skip_special_tokens=True
+            ).strip()
+            t_end = time.perf_counter()
+            total_ms = (t_end - t_start) * 1000.0
+            gen_tokens = int(generated.shape[-1] - prompt_len)
+            metrics.update(
+                {
+                    "ttft_ms": total_ms,
+                    "total_ms": total_ms,
+                    "decode_ms": total_ms,
+                    "tokens": max(gen_tokens, 0),
+                }
+            )
+            duration = t_end - t_start
+            if duration > 0:
+                metrics["tps"] = metrics["tokens"] / duration
+            return {"content": generated_text, "metrics": metrics}
 
     return app
 

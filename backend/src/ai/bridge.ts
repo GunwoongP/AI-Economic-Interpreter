@@ -1,5 +1,5 @@
 import type { Card, Role, SeriesResp } from '../types.js';
-import { localGenerate, ChatMsg } from './provider_local.js';
+import { localGenerate, ChatMsg, ProviderMetrics } from './provider_local.js';
 import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt, marketSummaryPrompt, type PromptEvidence } from './prompts.js';
 
 export type AskRole = 'eco' | 'firm' | 'house';
@@ -9,6 +9,26 @@ const ROLE_LORA_NAMES: Record<AskRole, string> = {
   firm: 'firm',
   house: 'house',
 };
+
+function resolveMaxTokens(value: string | undefined, fallback: number): number {
+  if (value) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(Math.floor(parsed), 8192);
+    }
+  }
+  return fallback;
+}
+
+const ROLE_MAX_TOKENS = resolveMaxTokens(
+  process.env.ASK_ROLE_MAX_TOKENS ?? process.env.ASK_MAX_TOKENS,
+  4096,
+);
+
+const EDITOR_MAX_TOKENS = resolveMaxTokens(
+  process.env.ASK_EDITOR_MAX_TOKENS ?? process.env.ASK_MAX_TOKENS,
+  4096,
+);
 
 const ATTACHED_ROLES = new Set<AskRole>();
 
@@ -166,7 +186,7 @@ export async function genDraft(
 
   const msgs = draftPrompt(role as any, q, promptEvidences, previousCards) as ChatMsg[];
   const { content } = await localGenerate(role, msgs, {
-    max_tokens: 600,
+    max_tokens: ROLE_MAX_TOKENS,
     temperature,
     loraName: resolveLoraName(role),
   });
@@ -195,15 +215,15 @@ export async function genEditor(params: {
   drafts: Card[];
   mode: 'parallel' | 'sequential';
   roles: Role[];
-}) {
+}): Promise<{ cards: Card[]; metrics?: ProviderMetrics }> {
   const msgs = editorPrompt(
     params.query,
     params.drafts.map((d) => `${d.title}\n${d.content}`),
     params.mode,
     params.roles,
   ) as ChatMsg[];
-  const { content } = await localGenerate('editor', msgs, {
-    max_tokens: 1200,
+  const { content, metrics } = await localGenerate('editor', msgs, {
+    max_tokens: EDITOR_MAX_TOKENS,
     temperature: 0.2,
   });
   const cleaned = sanitizeGenerated(content) || content;
@@ -228,7 +248,7 @@ export async function genEditor(params: {
       }
     });
   }
-  return { cards };
+  return { cards, metrics };
 }
 
 export interface PlanResult {

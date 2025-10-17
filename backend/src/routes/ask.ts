@@ -59,7 +59,45 @@ function enforceAllowed(path: AskRole[]): AskRole[] {
 // ✅ 질문에서 역할 자동 분류 (prefer 병합)
 function selectRoles(q: string, prefer: Role[] = []): AskRole[] {
   const s = (q || '').toLowerCase();
-  const buffer: Role[] = Array.isArray(prefer) ? prefer.slice(0, 3) : [];
+  const preferSeed = Array.isArray(prefer) ? sanitizeSequence(prefer.slice(0, 3)) : [];
+  const preferActive = preferSeed.length > 0;
+  const hasInvest = /(투자|포트폴리오|리밸런싱|매수|매도|분산투자|자산배분|전략)/.test(s);
+  const hasMacroCue = /(gdp|국내총생산|금리|환율|정책|경기|경제|물가|부동산|dxy|유가)/.test(s);
+  const hasSpecificFirm =
+    /(삼성|하이닉스|네이버|카카오|현대|sk|lg|테슬라|엔비디아|애플|apple|msft|마이크로소프트|구글|알파벳|meta|아마존|tsmc|엔씨|ncsoft|카카오페이|kb|국민은행|신한|이마트|롯데|posco)/i.test(
+      s,
+    );
+  const hasGenericFirm = /(기업|회사|업종|섹터|산업|종목|분야|시장)/.test(s);
+  const hasHouseCue =
+    /(가계|가족|은퇴|연금|저축|예금|적금|채권|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지|재무설계|자산배분|보험)/.test(
+      s,
+    );
+
+  if (!preferActive) {
+    if (/(gdp|국내총생산)/.test(s)) {
+      return ['eco'];
+    }
+    if (hasSpecificFirm && hasInvest) {
+      return ['firm', 'house'];
+    }
+    if (hasSpecificFirm && !hasInvest && !hasMacroCue) {
+      return ['firm'];
+    }
+    if (hasHouseCue && !hasSpecificFirm && !hasGenericFirm) {
+      return hasMacroCue ? ['eco', 'house'] : ['house'];
+    }
+    if (hasMacroCue && hasInvest && !hasSpecificFirm && !hasGenericFirm) {
+      return ['eco', 'house'];
+    }
+    if (!hasSpecificFirm && hasGenericFirm && hasInvest) {
+      return ['eco', 'firm', 'house'];
+    }
+    if (!hasSpecificFirm && !hasGenericFirm && hasMacroCue && !hasHouseCue && !hasInvest) {
+      return ['eco'];
+    }
+  }
+
+  const buffer: Role[] = preferSeed.slice(0, 3);
 
   // Special intent routing: force paths for common Korean phrasings
   // 1) "코스피가 뭐야/무엇/뜻/설명" -> eco only
@@ -75,9 +113,9 @@ function selectRoles(q: string, prefer: Role[] = []): AskRole[] {
     return ['eco', 'firm', 'house'];
   }
 
-  if (/(금리|환율|정책|경기|물가|부동산|dxy|유가)/.test(s)) buffer.push('eco');
-  if (/(per|roe|재무|실적|기업|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) buffer.push('firm');
-  if (/(가계|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지)/.test(s)) buffer.push('house');
+  if (/(금리|환율|정책|경기|경제|물가|부동산|dxy|유가|gdp|국내총생산)/.test(s)) buffer.push('eco');
+  if (/(per|roe|재무|실적|기업|회사|종목|반도체|리츠|삼성|네이버|하이닉스|현대|sk|지수|섹터|업종|밸류)/i.test(s)) buffer.push('firm');
+  if (/(가계|포트폴리오|dsr|대출|분산|예산|리스크|현금흐름|레버리지|채권|저축|예금|적금|연금|보험)/.test(s)) buffer.push('house');
 
   let roles = sanitizeSequence(buffer);
   if (!roles.length) {
@@ -459,15 +497,39 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
     .map((role) => draftMap.get(role)!);
 
   const final = await genEditor({ query: q, drafts, mode, roles: generationRoles });
-  const ttft   = Date.now() - t0;
+  const modelMetrics = (final.metrics ?? {}) as Record<string, unknown>;
+  const fallbackTtft = Date.now() - t0;
+
+  const ttftCandidate = Number((modelMetrics as any).ttft_ms);
+  const tokensCandidate = Number((modelMetrics as any).tokens);
+  const tpsCandidate = Number((modelMetrics as any).tps);
+
+  const avgConf = drafts.reduce((s, d) => s + (d.conf ?? 0.7), 0) / Math.max(1, drafts.length);
+  const metrics: AskOutput['metrics'] = {
+    ttft_ms: Number.isFinite(ttftCandidate) ? ttftCandidate : fallbackTtft,
+    conf: avgConf,
+  };
+  if (Number.isFinite(tokensCandidate)) {
+    metrics.tokens = tokensCandidate;
+  }
+  if (Number.isFinite(tpsCandidate)) {
+    metrics.tps = tpsCandidate;
+  }
+
+  console.log('[ASK][metrics]', {
+    q: q.slice(0, 80),
+    mode,
+    roles: generationRoles,
+    ttft_ms: metrics.ttft_ms ?? null,
+    tps: metrics.tps ?? null,
+    tokens: metrics.tokens ?? null,
+    conf: metrics.conf ?? null,
+  });
 
   const roleBases = getRoleBases();
   const out: AskOutput = {
     cards: final.cards.slice(0, 3),
-    metrics: {
-      ttft_ms: ttft,
-      conf: drafts.reduce((s, d) => s + (d.conf ?? 0.7), 0) / Math.max(1, drafts.length)
-    },
+    metrics,
     meta: {
       mode,
       roles,
