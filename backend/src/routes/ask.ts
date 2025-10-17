@@ -459,15 +459,39 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
     .map((role) => draftMap.get(role)!);
 
   const final = await genEditor({ query: q, drafts, mode, roles: generationRoles });
-  const ttft   = Date.now() - t0;
+  const modelMetrics = (final.metrics ?? {}) as Record<string, unknown>;
+  const fallbackTtft = Date.now() - t0;
+
+  const ttftCandidate = Number((modelMetrics as any).ttft_ms);
+  const tokensCandidate = Number((modelMetrics as any).tokens);
+  const tpsCandidate = Number((modelMetrics as any).tps);
+
+  const avgConf = drafts.reduce((s, d) => s + (d.conf ?? 0.7), 0) / Math.max(1, drafts.length);
+  const metrics: AskOutput['metrics'] = {
+    ttft_ms: Number.isFinite(ttftCandidate) ? ttftCandidate : fallbackTtft,
+    conf: avgConf,
+  };
+  if (Number.isFinite(tokensCandidate)) {
+    metrics.tokens = tokensCandidate;
+  }
+  if (Number.isFinite(tpsCandidate)) {
+    metrics.tps = tpsCandidate;
+  }
+
+  console.log('[ASK][metrics]', {
+    q: q.slice(0, 80),
+    mode,
+    roles: generationRoles,
+    ttft_ms: metrics.ttft_ms ?? null,
+    tps: metrics.tps ?? null,
+    tokens: metrics.tokens ?? null,
+    conf: metrics.conf ?? null,
+  });
 
   const roleBases = getRoleBases();
   const out: AskOutput = {
     cards: final.cards.slice(0, 3),
-    metrics: {
-      ttft_ms: ttft,
-      conf: drafts.reduce((s, d) => s + (d.conf ?? 0.7), 0) / Math.max(1, drafts.length)
-    },
+    metrics,
     meta: {
       mode,
       roles,

@@ -36,11 +36,26 @@ type GenerateOpts = {
   loraName?: string;
 };
 
+export type ProviderMetrics = {
+  ttft_ms?: number;
+  total_ms?: number;
+  decode_ms?: number;
+  tokens?: number;
+  prompt_tokens?: number;
+  tps?: number;
+};
+
+export type LocalGenerateResult = {
+  content: string;
+  raw: any;
+  metrics?: ProviderMetrics;
+};
+
 export async function localGenerate(
   target: Target,
   messages: ChatMsg[],
   opts?: GenerateOpts,
-) {
+): Promise<LocalGenerateResult> {
   const base = baseFor(target).replace(/\/+$/, '');
   const payload: Record<string, unknown> = {
     messages,
@@ -76,7 +91,8 @@ ${responseText}`);
     throw new Error(`LOCAL AI JSON parse failed (${target}@${base}): ${(err as Error).message}
 ${responseText}`);
   }
-  return { content: (json.content || '').trim(), raw: json };
+  const metrics = json && typeof json.metrics === 'object' ? (json.metrics as ProviderMetrics) : undefined;
+  return { content: (json.content || '').trim(), raw: json, metrics };
 }
 
 export function getRoleBases(): Record<'eco' | 'firm' | 'house' | 'editor', string> {
