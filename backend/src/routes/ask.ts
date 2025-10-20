@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { AskInput, AskOutput, Card, Role } from '../types.js';
-import { attachAdapters, detachAll, genDraft, genEditor, planRoles, AskRole, Evidence } from '../ai/bridge.js';
+import { attachAdapters, detachAll, genDraft, genEditor, AskRole, Evidence } from '../ai/bridge.js';
 import { getRoleBases } from '../ai/provider_local.js';
 import { searchRAG } from '../ai/rag.js';
 
@@ -162,9 +162,6 @@ interface PreparedAsk {
   roles: Role[];
   mode: 'parallel'|'sequential';
   generationRoles: AskRole[];
-  planReason?: string;
-  planRoles?: AskRole[];
-  planConfidence?: number;
 }
 
 async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
@@ -177,29 +174,20 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
   const explicitRaw = sanitizeSequence(Array.isArray(body.roles) ? body.roles : undefined);
   const explicit = explicitRaw.length ? enforceAllowed(explicitRaw) : [];
   const preferList = Array.isArray(body.prefer) ? body.prefer : [];
-  const fallback = selectRoles(q, preferList);
-  const plannerEnabled = !explicit.length;
-  let planner = null;
-  if (plannerEnabled) {
-    planner = await planRoles({ query: q, prefer: preferList, hintMode: (body.mode ?? 'auto') as any });
-  }
 
-  const plannerPath = planner?.path ?? [];
-  const mergedPath = explicit.length
-    ? explicit
-    : plannerPath.length
-    ? enforceAllowed(plannerPath)
-    : fallback;
+  // AI planner 제거, 휴리스틱 기반 role selection 사용
+  const roles = explicit.length ? explicit : selectRoles(q, preferList);
 
+  // Mode 결정: 명시적 지정 > 역할 개수 기반 > 질문 패턴 분석
   const hasExplicitMode = body.mode && body.mode !== 'auto';
-  let mode = planner?.mode ?? (mergedPath.length > 1 ? 'sequential' : 'parallel');
+  let mode: 'parallel' | 'sequential';
   if (hasExplicitMode) {
     mode = body.mode as 'parallel' | 'sequential';
-  } else if (!planner?.mode && mergedPath.length <= 1) {
-    mode = selectMode(q, (body.mode ?? 'auto') as any);
+  } else {
+    mode = roles.length > 1 ? 'sequential' : selectMode(q, (body.mode ?? 'auto') as any);
   }
 
-  const generationRoles: AskRole[] = mergedPath.length ? mergedPath : ['eco'];
+  const generationRoles: AskRole[] = roles.length ? roles : ['eco'];
   const uniqueRoles = Array.from(new Set(generationRoles)) as Role[];
 
   return {
@@ -207,9 +195,6 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
     roles: uniqueRoles,
     mode,
     generationRoles,
-    planReason: planner?.reason,
-    planRoles: plannerPath.length ? plannerPath : undefined,
-    planConfidence: planner?.confidence,
   };
 }
 
@@ -221,7 +206,7 @@ const ROLE_QUERY_HINTS: Record<AskRole, string[]> = {
   house: ['가계', '포트폴리오', '대출', '소비', '위험 관리'],
 };
 
-function compactCardForContext(card: Card, maxLines = 4, maxChars = 420): Card {
+function compactCardForContext(card: Card, maxLines = 6, maxChars = 800): Card {
   const lines = card.content
     .split(/\n+/)
     .map((line) => line.trim())
@@ -253,26 +238,33 @@ function buildRoleQuery(role: AskRole, question: string, previous: Card[]): stri
     parts.push(trimmedQ);
   }
   if (previous.length) {
-    const previousText = previous
-      .map((card) => `[${card.type.toUpperCase()}] ${card.title}: ${card.content}`)
+    // 이전 카드의 제목 + 첫 2줄만 사용하여 RAG 쿼리 정확도 향상
+    const summary = previous
+      .map((card) => {
+        const firstLines = card.content.split('\n').slice(0, 2).join(' ').trim();
+        return `[${card.type.toUpperCase()}] ${card.title}: ${firstLines}`;
+      })
       .join('\n');
-    parts.push(previousText);
+    parts.push(summary);
   }
-  const hints = ROLE_QUERY_HINTS[role];
-  if (hints?.length) {
-    parts.push(`역할 키워드: ${hints.join(', ')}`);
-  }
+  // 역할 키워드 제거 (RAG는 이미 role별 필터링, 불필요한 노이즈)
   const joined = parts.join('\n\n').trim();
-  return joined.length > 2048 ? joined.slice(0, 2048) : joined;
+  return joined.length > 1500 ? joined.slice(0, 1500) : joined;
 }
 
 async function gatherEvidence(role: AskRole, question: string, previous: Card[]): Promise<Evidence[]> {
   if (!question?.trim()) return [];
   const query = buildRoleQuery(role, question, previous);
   try {
-    let hits = await searchRAG(query, [role], 4);
+    let hits = await searchRAG(query, [role], 6);
     if (!hits.length && previous.length) {
-      hits = await searchRAG(question, [role], 4);
+      // 이전 카드에서 키워드 추출하여 재시도
+      const keywords = previous.flatMap(c => c.content.match(/[가-힣]{2,}/g) || []).slice(0, 5).join(' ');
+      hits = await searchRAG(`${question} ${keywords}`, [role], 6);
+    }
+    if (!hits.length) {
+      // 최종 fallback: 질문만으로 재시도
+      hits = await searchRAG(question, [role], 6);
     }
     const seen = new Set<string>();
     const uniqueHits = hits.filter((hit) => {
@@ -281,7 +273,7 @@ async function gatherEvidence(role: AskRole, question: string, previous: Card[])
       seen.add(key);
       return true;
     });
-    return uniqueHits.slice(0, 2).map((hit, idx) => {
+    return uniqueHits.slice(0, 3).map((hit, idx) => {
       const meta = (hit.meta && typeof hit.meta === 'object') ? (hit.meta as Record<string, unknown>) : {};
       const source = typeof meta.title === 'string' && meta.title.trim().length
         ? meta.title.trim()
@@ -309,15 +301,12 @@ interface AskRunOptions {
 }
 
 async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<AskOutput> {
-  const { q, roles, mode, generationRoles, planReason, planRoles, planConfidence } = prepared;
+  const { q, roles, mode, generationRoles } = prepared;
 
   console.log('[ASK]', {
     q: q.slice(0, 60),
-    planner_roles: planRoles,
     roles,
     mode,
-    planReason,
-    planConfidence,
   });
 
   const t0 = Date.now();
@@ -349,7 +338,7 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
 
       const existingNormalized = new Set(usedNormalized);
       const existingFingerprints = new Set(usedFingerprints);
-      const attemptTemps = [0.2, 0.45, 0.7, 0.9];
+      const attemptTemps = [0.3, 0.6];
       let selected: Card | null = null;
       let normalized = '';
       let fingerprint = '';
@@ -378,19 +367,10 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
       }
 
       if (!selected) {
-        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.7);
+        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.5);
         selected = candidate;
         normalized = candidateNormalized;
         fingerprint = candidateFingerprint;
-      }
-
-      if (!normalized || normalized.length < 80) {
-        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.85);
-        if (candidateNormalized.length > (normalized?.length ?? 0)) {
-          selected = candidate;
-          normalized = candidateNormalized;
-          fingerprint = candidateFingerprint;
-        }
       }
 
       let finalDraft: Card = selected as Card;
@@ -398,23 +378,6 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
       fingerprint = fingerprint || fingerprintContent(finalDraft.content);
 
       let duplicateDetected =
-        (normalized && existingNormalized.has(normalized)) ||
-        (fingerprint && existingFingerprints.has(fingerprint));
-
-      if (duplicateDetected) {
-        const { candidate, candidateNormalized, candidateFingerprint } = await generateCandidate(0.95);
-        if (
-          candidateNormalized &&
-          !existingNormalized.has(candidateNormalized) &&
-          (!candidateFingerprint || !existingFingerprints.has(candidateFingerprint))
-        ) {
-          finalDraft = candidate;
-          normalized = candidateNormalized;
-          fingerprint = candidateFingerprint;
-        }
-      }
-
-      duplicateDetected =
         (normalized && existingNormalized.has(normalized)) ||
         (fingerprint && existingFingerprints.has(fingerprint));
 
@@ -444,26 +407,7 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
         }
       }
 
-      if (duplicateDetected && evidences.length) {
-        const top = evidences[0];
-        const label = top.label ? `${top.label}-F` : 'RAG#F';
-        const date = top.date ?? (typeof top.meta?.date === 'string' ? top.meta.date : 'N/A');
-        const source = top.source ?? top.meta?.source ?? top.meta?.title ?? 'RAG 근거';
-        const ref = `(${label} | ${date} | ${source})`;
-        const roleTag =
-          role === 'firm'
-            ? '기업 관점'
-            : role === 'house'
-            ? '가계 관점'
-            : '거시 관점';
-        const summaryTitle = top.meta?.title ?? source ?? 'RAG 요약';
-        finalDraft.content = `${finalDraft.content}\n- ${roleTag} 추가 인사이트: ${summaryTitle} ${ref}`.trim();
-        normalized = normalizeContent(finalDraft.content);
-        fingerprint = fingerprintContent(finalDraft.content);
-        duplicateDetected =
-          (normalized && existingNormalized.has(normalized)) ||
-          (fingerprint && existingFingerprints.has(fingerprint));
-      }
+      // 중복 감지 시 추가 인사이트 주입 로직 제거 (Sequential 모드에서는 자연스럽게 다른 관점 생성)
 
       if (normalized) {
         usedNormalized.add(normalized);
@@ -535,9 +479,6 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
       roles,
       provider: 'local_moe',
       ai_base: roleBases,
-      plan_reason: planReason,
-      plan_roles: planRoles,
-      plan_confidence: planConfidence,
     }
   };
 
