@@ -2,7 +2,8 @@ import { Router } from 'express';
 import type { AskInput, AskOutput, Card, Role } from '../types.js';
 import { attachAdapters, detachAll, genDraft, genEditor, classifyQueryWithRouter, AskRole, Evidence } from '../ai/bridge.js';
 import { getRoleBases } from '../ai/provider_local.js';
-import { searchRAG } from '../ai/rag.js';
+// import { searchRAG } from '../ai/rag.js';  // Legacy token-based search
+import { searchRAG, isFaissAvailable } from '../ai/rag_faiss.js';  // FAISS vector search
 
 const router = Router();
 

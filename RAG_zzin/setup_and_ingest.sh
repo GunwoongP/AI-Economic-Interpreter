@@ -32,6 +32,6 @@ if [[ ! -d "${DATA_DIR}" ]]; then
 fi
 
 echo "Building vector index from ${DATA_DIR}"
-PYTHONPATH="${SCRIPT_DIR}/..:${PYTHONPATH:-}" "${VENV_PYTHON}" -m RAG_zzin.ingest --input "${DATA_DIR}"
+"${VENV_PYTHON}" -m RAG.ingest --input "${DATA_DIR}"
 
 echo "Setup complete."

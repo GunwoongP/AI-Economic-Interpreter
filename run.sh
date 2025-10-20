@@ -152,6 +152,12 @@ start_service "market-api" "$ROOT_DIR/market_api" "${MARKET_API_CMD[@]}"
 start_service "ai-core" "$ROOT_DIR/ai" \
   "$PYTHON_BIN" main.py
 
+# FAISS RAG Server (port 8004)
+# Provides semantic vector search for RAG
+# Requires: data/faiss/index_*.bin (built by scripts/build_faiss_index.py)
+start_service "faiss-rag" "$ROOT_DIR/ai" \
+  "$PYTHON_BIN" main_faiss.py --host 0.0.0.0 --port 8004
+
 start_service "backend" "$ROOT_DIR/backend" \
   env PORT="$BACKEND_PORT" "$NODE_BIN" run dev
 
