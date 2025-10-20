@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Dict, Any
 
-from RAG import RAGPipeline
+try:
+    from RAG import RAGPipeline  # type: ignore
+except ImportError:
+    from RAG_zzin import RAGPipeline  # type: ignore
 
 
 def load_queries(path: Path) -> List[str]:
@@ -91,8 +94,12 @@ def build_markdown(
 
 def collect_dataset_stats(data_dir: Path) -> tuple[List[tuple[str, str, int]], Dict[str, int]]:
     from collections import Counter
-    from RAG.datasets import load_records_for_path
-    from RAG.utils import read_text_from_file
+    try:
+        from RAG.datasets import load_records_for_path  # type: ignore
+        from RAG.utils import read_text_from_file  # type: ignore
+    except ImportError:
+        from RAG_zzin.datasets import load_records_for_path  # type: ignore
+        from RAG_zzin.utils import read_text_from_file  # type: ignore
 
     file_rows: List[tuple[str, str, int]] = []
     dataset_totals: Dict[str, int] = Counter()
@@ -139,7 +146,7 @@ def main() -> None:
         default=default_report_out,
         help=f"리포트 Markdown 저장 경로 (기본값: {default_report_out})",
     )
-    parser.add_argument("--top-k", type=int, default=3, help="검색할 컨텍스트 수 (기본 3)")
+    parser.add_argument("--top-k", type=int, default=5, help="검색할 컨텍스트 수 (기본 5)")
     parser.add_argument("--use-llm", action="store_true", help="LLM 요약 사용 여부")
     args = parser.parse_args()
 
