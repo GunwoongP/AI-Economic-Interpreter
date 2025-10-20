@@ -89,6 +89,7 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export DATA_DIR="${DATA_DIR:-${SCRIPT_DIR}/${INDEX_PATH}}"
 export INDEX_NAME="${INDEX_NAME:-default}"
 
+
 if [[ ${RUN_INGEST} -eq 1 ]]; then
   echo "[setup] building vector index (${INDEX_NAME}) from ${INPUT_DIR}"
   "${PY_CMD}" -m RAG_zzin.ingest --input "${INPUT_DIR}" "${ARGS[@]}"
