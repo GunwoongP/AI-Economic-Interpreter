@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { AskInput, AskOutput, Card, Role } from '../types.js';
-import { attachAdapters, detachAll, genDraft, genEditor, AskRole, Evidence } from '../ai/bridge.js';
+import { attachAdapters, detachAll, genDraft, genEditor, classifyQueryWithRouter, AskRole, Evidence } from '../ai/bridge.js';
 import { getRoleBases } from '../ai/provider_local.js';
 import { searchRAG } from '../ai/rag.js';
 
@@ -162,6 +162,8 @@ interface PreparedAsk {
   roles: Role[];
   mode: 'parallel'|'sequential';
   generationRoles: AskRole[];
+  routerSource?: string;
+  routerConfidence?: number;
 }
 
 async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
@@ -175,8 +177,45 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
   const explicit = explicitRaw.length ? enforceAllowed(explicitRaw) : [];
   const preferList = Array.isArray(body.prefer) ? body.prefer : [];
 
-  // AI planner 제거, 휴리스틱 기반 role selection 사용
-  const roles = explicit.length ? explicit : selectRoles(q, preferList);
+  // ══════════════════════════════════════════════════════
+  // Hybrid Router: AI (Eco 재사용) → Heuristic fallback
+  // ══════════════════════════════════════════════════════
+
+  let roles: AskRole[] = [];
+  let confidence = 0;
+  let source = 'heuristic';
+
+  if (explicit.length) {
+    // 명시적 지정 (최우선)
+    roles = explicit;
+    confidence = 1.0;
+    source = 'explicit';
+  } else {
+    // 자동 선택: AI Router 시도 → 실패 시 휴리스틱
+    try {
+      const routerResult = await classifyQueryWithRouter(q, { timeout: 150 });
+
+      // 신뢰도 70% 이상만 사용
+      if (routerResult && routerResult.confidence >= 0.7) {
+        roles = routerResult.roles;
+        confidence = routerResult.confidence;
+        source = 'ai_router';
+        console.log(
+          `[ASK][Router] AI: ${JSON.stringify(roles)} (conf=${confidence.toFixed(2)})`
+        );
+      } else {
+        throw new Error('Low confidence or no result');
+      }
+    } catch (err) {
+      // Heuristic fallback (항상 성공)
+      roles = selectRoles(q, preferList);
+      confidence = 0.85;
+      source = 'heuristic_fallback';
+      console.warn(
+        `[ASK][Router] AI failed/timeout, using heuristic: ${JSON.stringify(roles)}`
+      );
+    }
+  }
 
   // Mode 결정: 명시적 지정 > 역할 개수 기반 > 질문 패턴 분석
   const hasExplicitMode = body.mode && body.mode !== 'auto';
@@ -195,6 +234,8 @@ async function prepareAsk(body: AskInput): Promise<PreparedAsk> {
     roles: uniqueRoles,
     mode,
     generationRoles,
+    routerSource: source,
+    routerConfidence: confidence,
   };
 }
 
@@ -301,12 +342,14 @@ interface AskRunOptions {
 }
 
 async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<AskOutput> {
-  const { q, roles, mode, generationRoles } = prepared;
+  const { q, roles, mode, generationRoles, routerSource, routerConfidence } = prepared;
 
   console.log('[ASK]', {
     q: q.slice(0, 60),
     roles,
     mode,
+    router: routerSource,
+    confidence: routerConfidence?.toFixed(2),
   });
 
   const t0 = Date.now();
@@ -479,6 +522,8 @@ async function runAsk(prepared: PreparedAsk, options?: AskRunOptions): Promise<A
       roles,
       provider: 'local_moe',
       ai_base: roleBases,
+      router_source: routerSource,
+      router_confidence: routerConfidence,
     }
   };
 

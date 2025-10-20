@@ -26,11 +26,28 @@ AI_VERIFY_PAYLOAD='{"messages":[{"role":"user","content":"ping"}]}'
 
 VERIFY_STARTUP="${VERIFY_STARTUP:-1}"
 
-# Bind AI services to the freshly compiled 32K LoRA models by default (can be overridden via env)
-MODEL_BACKEND="${MODEL_BACKEND:-rbln}"
-ECO_MODEL_ID="${ECO_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_eco_32k/compiled}"
-FIRM_MODEL_ID="${FIRM_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_firm_32k/compiled}"
-HOUSE_MODEL_ID="${HOUSE_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_house_32k/compiled}"
+# AI backend selection: auto-detect NPU > GPU > CPU (can be overridden via env)
+# For NPU (RBLN Atom): Use compiled models
+# For GPU/CPU: Use HuggingFace models + LoRA adapters
+MODEL_BACKEND="${MODEL_BACKEND:-auto}"
+
+if [[ "$MODEL_BACKEND" == "auto" ]]; then
+  # Auto-detect: check if rbln-stat is available
+  if command -v rbln-stat >/dev/null 2>&1 && rbln-stat 2>/dev/null | grep -q "RBLN"; then
+    log "INFO" "NPU (RBLN) detected, using compiled models"
+    MODEL_BACKEND="rbln"
+    ECO_MODEL_ID="${ECO_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_eco_32k/compiled}"
+    FIRM_MODEL_ID="${FIRM_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_firm_32k/compiled}"
+    HOUSE_MODEL_ID="${HOUSE_MODEL_ID:-/home/elicer/yeonsup/compiled_lora_house_32k/compiled}"
+  else
+    log "INFO" "No NPU detected, using GPU/CPU with HuggingFace models"
+    MODEL_BACKEND="torch"
+    ECO_MODEL_ID="${ECO_MODEL_ID:-Qwen/Qwen3-0.6B}"
+    FIRM_MODEL_ID="${FIRM_MODEL_ID:-Qwen/Qwen3-0.6B}"
+    HOUSE_MODEL_ID="${HOUSE_MODEL_ID:-Qwen/Qwen3-0.6B}"
+  fi
+fi
+
 export MODEL_BACKEND ECO_MODEL_ID FIRM_MODEL_ID HOUSE_MODEL_ID
 
 mkdir -p "$LOG_DIR"

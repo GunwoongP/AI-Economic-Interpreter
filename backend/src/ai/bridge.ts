@@ -210,6 +210,53 @@ export async function genDraft(
   };
 }
 
+export async function classifyQueryWithRouter(
+  q: string,
+  opts?: { timeout?: number }
+): Promise<{ roles: AskRole[]; confidence: number } | null> {
+  try {
+    const { routerPromptV2 } = await import('./prompts.js');
+    const msgs = routerPromptV2(q);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), opts?.timeout ?? 150);
+
+    try {
+      const { content } = await localGenerate('router', msgs, {
+        max_tokens: 30,
+        temperature: 0,
+      });
+
+      clearTimeout(timeoutId);
+
+      // JSON 파싱
+      const text = content.trim().replace(/^```json\s*|```$/g, '');
+      const match = text.match(/\{[^}]+\}/);
+      if (!match) return null;
+
+      const data = JSON.parse(match[0]);
+
+      if (!Array.isArray(data.roles)) return null;
+
+      const roles = data.roles.filter(
+        (r: string) => r === 'eco' || r === 'firm' || r === 'house'
+      ) as AskRole[];
+
+      if (!roles.length) return null;
+
+      // 응답 길이로 신뢰도 추정
+      const confidence = content.length < 50 ? 0.9 : 0.7;
+
+      return { roles, confidence };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch (err) {
+    console.warn('[Router] Classification failed:', err);
+    return null;
+  }
+}
+
 export async function genEditor(params: {
   query: string;
   drafts: Card[];

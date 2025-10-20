@@ -60,6 +60,33 @@ ${evidenceSection}${prior}
     }
   ];
 }
+/**
+ * 경량화된 Router 프롬프트 (V2)
+ * - Eco 서버 재사용
+ * - 150자 짧은 프롬프트 (기존 1,200자 대비 -87%)
+ * - max_tokens: 30 (기존 250 대비 -88%)
+ * - 추론 시간: 80-120ms 예상 (기존 200-300ms 대비 -60%)
+ */
+export function routerPromptV2(q: string): ChatMsg[] {
+  return [
+    {
+      role: 'system',
+      content: `질문을 읽고 필요한 전문가를 선택하라.
+
+전문가:
+- eco: 금리·환율·경기·물가·정책
+- firm: 기업·주가·실적·재무
+- house: 가계·대출·포트폴리오·저축
+
+출력: {"roles":["eco"]} (JSON만)`
+    },
+    {
+      role: 'user',
+      content: `${q}\n\nJSON:`
+    }
+  ];
+}
+
 export function editorPrompt(q: string, drafts: string[], mode: 'parallel'|'sequential', roles: Role[]): ChatMsg[] {
   const joined = drafts.map((d,i)=>`[초안${i+1}]\n${d}`).join('\n\n');
   const roleLabels: Record<Role, string> = { eco: 'ECO', firm: 'FIRM', house: 'HOUSE', combined: 'COMBINED' };
