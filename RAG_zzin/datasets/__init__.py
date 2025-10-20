@@ -108,6 +108,35 @@ def _build_naver_terms(obj: Dict[str, Any], source_file: str) -> Optional[Ingest
     )
 
 
+def _build_events_catalog(obj: Dict[str, Any], source_file: str) -> Optional[IngestRecord]:
+    name = obj.get("name")
+    summary = obj.get("summary")
+    year = obj.get("year")
+    if not name or not summary or year is None:
+        return None
+    text_parts = [name, summary]
+    if year is not None:
+        text_parts.append(f"year: {year}")
+    region = obj.get("region")
+    if region:
+        text_parts.append(f"region: {region}")
+    extra = {
+        "event_id": obj.get("id"),
+        "name": name,
+        "summary": summary,
+        "year": year,
+        "region": region,
+        "sources": obj.get("sources"),
+    }
+    return _make_record(
+        text="\n".join(text_parts),
+        source=str(obj.get("source") or source_file),
+        dataset="events_catalog",
+        source_file=source_file,
+        extra_meta=extra,
+    )
+
+
 def _build_wise_reports(obj: Dict[str, Any], source_file: str) -> Optional[IngestRecord]:
     market = obj.get("market")
     code = obj.get("code")
@@ -193,6 +222,11 @@ SCHEMA_HANDLERS: List[DatasetSpec] = [
         name="econ_terms",
         predicate=lambda obj: _has_keys(obj, ("question", "answer")),
         builder=_build_econ_terms,
+    ),
+    DatasetSpec(
+        name="events_catalog",
+        predicate=lambda obj: obj.get("name") and obj.get("summary") and obj.get("year") is not None,
+        builder=_build_events_catalog,
     ),
     DatasetSpec(
         name="naver_terms",
