@@ -469,7 +469,11 @@ router.post('/', async (req, res) => {
   try {
     const body = (req.body ?? {}) as AskInput;
     const prepared = await prepareAsk(body);
-    const out = await runAsk(prepared);
+    const out = await runAsk(prepared, {
+      onDraft: async (draft) => {
+        send({ type: 'draft', data: draft });
+      },
+    });
     return res.json(out);
   } catch (err: any) {
     console.error('[ASK][ERROR]', err?.message || err);
