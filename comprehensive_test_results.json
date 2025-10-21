@@ -1,0 +1,794 @@
+{
+  "test_date": "2025-10-21T08:32:41.416003",
+  "summary": {
+    "total_tests": 7,
+    "total_mode_tests": 11,
+    "router_accuracy": 1.0,
+    "think_tag_issues": 0,
+    "duplicate_combined_issues": 2
+  },
+  "results": [
+    {
+      "test_case": {
+        "id": 1,
+        "question": "GDP가 뭐야?",
+        "expected_roles": [
+          "eco"
+        ],
+        "category": "ECO only - definition",
+        "check_rag": true,
+        "test_modes": [
+          "sequential",
+          "parallel"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "eco"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[초안1]",
+                "content_length": 598,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 265,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | IMF)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2024 | OECD)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#3 | 2025 | World Bank)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#4 | 2026 | ECO)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023 | IMF)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#2 | 2024 | OECD)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        },
+        "parallel": {
+          "analysis": {
+            "roles": [
+              "eco"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "parallel",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드 1]",
+                "content_length": 372,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 236,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | 출처)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2023 | 출처)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#3 | 2023 | 출처)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023 | 출처)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#2 | 2023 | 출처)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#3 | 2023 | 출처)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 2,
+        "question": "삼성전자 실적 어때?",
+        "expected_roles": [
+          "firm"
+        ],
+        "category": "FIRM only - company performance",
+        "check_rag": true,
+        "test_modes": [
+          "sequential",
+          "parallel"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "firm"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드1]",
+                "content_length": 615,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 290,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | 삼성전자 실적 분석)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2023 | 삼성전자 실적 분석)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#3 | 2023 | 삼성전자 실적 분석)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#1 | 2023 | 삼성전자 실적 분석)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        },
+        "parallel": {
+          "analysis": {
+            "roles": [
+              "firm"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "parallel",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드 1]",
+                "content_length": 228,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 87,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": []
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 3,
+        "question": "대출받을 때 주의사항",
+        "expected_roles": [
+          "house"
+        ],
+        "category": "HOUSE only - personal finance",
+        "check_rag": true,
+        "test_modes": [
+          "sequential",
+          "parallel"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "house"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드1]",
+                "content_length": 419,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "house",
+                "title": "가계 프레임",
+                "content_length": 279,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "house",
+                "reference": "(RAG#1 | 2023-10-01 | 출처: 대출 관련 자료)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        },
+        "parallel": {
+          "analysis": {
+            "roles": [
+              "house"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "parallel",
+            "cards_count": 2,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드 1]",
+                "content_length": 521,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "house",
+                "title": "가계 프레임",
+                "content_length": 181,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": []
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 4,
+        "question": "삼성전자 3분기 실적이 코스피에 미치는 영향은?",
+        "expected_roles": [
+          "eco",
+          "firm"
+        ],
+        "category": "ECO+FIRM - company impact on market",
+        "check_rag": true,
+        "test_modes": [
+          "sequential",
+          "parallel"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "eco",
+              "firm"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 4,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드1]",
+                "content_length": 500,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 262,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 336,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "combined",
+                "title": "종합 분석",
+                "content_length": 268,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [
+              "Multiple combined cards detected (2)"
+            ],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023-04-01 | 출처)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023-04-01 | 전 분석)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2023-04-01 | 전 분석)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023-04-01 | 출처: 삼성전자 공식 통지)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 날짜 | 출처)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#1 | 2023-04-01 | 전 분석)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#2 | 2023-04-01 | 전 분석)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#3 | 2023-04-01 | 전 분석)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        },
+        "parallel": {
+          "analysis": {
+            "roles": [
+              "eco",
+              "firm"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "parallel",
+            "cards_count": 3,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드1]",
+                "content_length": 376,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 213,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 202,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023-04-01 | https://www.kospi.co.kr)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | RAG#1)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023-04-01 | https://www.kospi.co.kr)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#1 | 2023 | RAG#1 | RAG#1)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 5,
+        "question": "포트폴리오 어떻게 구성해야 해?",
+        "expected_roles": [
+          "eco",
+          "house"
+        ],
+        "category": "ECO+HOUSE - investment strategy",
+        "check_rag": true,
+        "test_modes": [
+          "sequential"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "eco",
+              "house"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 4,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "**카드 1**",
+                "content_length": 539,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 300,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "house",
+                "title": "가계 프레임",
+                "content_length": 442,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "combined",
+                "title": "종합 분석",
+                "content_length": 187,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [
+              "Multiple combined cards detected (2)"
+            ],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | 저널)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2023-05-01 | 출처: 포트폴리오 관점 분석)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#3 | 2023-06-01 | 출처: 가계 재정 코치 설명)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023 | 저널)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#1 | 2023-04-01 | 출처: 가계 현금흐름 분석)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#2 | 2023-05-01 | 출처: 포트폴리오 관점 분석)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#3 | 2023-06-01 | 출처: 가계 재정 코치 설명)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 6,
+        "question": "어떤 기업에 투자하면 좋을까?",
+        "expected_roles": [
+          "eco",
+          "firm",
+          "house"
+        ],
+        "category": "ECO+FIRM+HOUSE - investment recommendation",
+        "check_rag": true,
+        "test_modes": [
+          "sequential"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "eco",
+              "firm",
+              "house"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 4,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "**카드 1:**",
+                "content_length": 408,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 130,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 229,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "house",
+                "title": "가계 프레임",
+                "content_length": 328,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "firm",
+                "reference": "(RAG#1 | 2023 | 전 분석)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#1 | 2023 | 출처)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#2 | 2023 | 출처)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    },
+    {
+      "test_case": {
+        "id": 7,
+        "question": "반도체 산업 전망과 투자 방법",
+        "expected_roles": [
+          "eco",
+          "firm",
+          "house"
+        ],
+        "category": "ECO+FIRM+HOUSE - sector analysis + investment",
+        "check_rag": true,
+        "test_modes": [
+          "sequential"
+        ]
+      },
+      "mode_results": {
+        "sequential": {
+          "analysis": {
+            "roles": [
+              "eco",
+              "firm",
+              "house"
+            ],
+            "router_source": "heuristic_fallback",
+            "router_confidence": 0.85,
+            "mode": "sequential",
+            "cards_count": 4,
+            "cards": [
+              {
+                "type": "combined",
+                "title": "[카드1]",
+                "content_length": 435,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "eco",
+                "title": "거시 핵심",
+                "content_length": 272,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "firm",
+                "title": "기업 스냅샷",
+                "content_length": 314,
+                "has_think_tags": false,
+                "sources": []
+              },
+              {
+                "type": "house",
+                "title": "가계 프레임",
+                "content_length": 350,
+                "has_think_tags": false,
+                "sources": []
+              }
+            ],
+            "issues": [],
+            "rag_sources": [
+              {
+                "card_type": "combined",
+                "reference": "(RAG#1 | 2023 | https://example.com)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#2 | 2024 | 기업 분석)"
+              },
+              {
+                "card_type": "combined",
+                "reference": "(RAG#3 | 2024 | 기업 분석)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#1 | 2023 | https://example.com)"
+              },
+              {
+                "card_type": "eco",
+                "reference": "(RAG#2 | 2023 | https://example.com)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#1 | 2024 | 기업 분석)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#2 | 2024 | 기업 분석)"
+              },
+              {
+                "card_type": "firm",
+                "reference": "(RAG#3 | 2024 | 기업 분석)"
+              },
+              {
+                "card_type": "house",
+                "reference": "(RAG#1 | 2023 | 출처: 반도체 산업 전망 분석)"
+              }
+            ]
+          },
+          "router_comparison": {
+            "correct": true,
+            "missing": [],
+            "extra": [],
+            "accuracy": 1.0
+          }
+        }
+      }
+    }
+  ]
+}

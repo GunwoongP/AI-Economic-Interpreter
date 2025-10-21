@@ -60,6 +60,7 @@ export type Evidence = {
   label?: string;
   source?: string;
   date?: string;
+  isHistoricalEvent?: boolean;  // For ECO: marks historical event catalog entries
 };
 export interface InsightSnippet {
   title: string;
@@ -208,6 +209,131 @@ export async function genDraft(
       score: evidences[idx]?.sim,
     })),
   };
+}
+
+/**
+ * Generate a compact 2-3 line summary of an expert's answer
+ * This summary is passed to the next expert in the sequential chain
+ */
+export async function genSummary(
+  role: Role,
+  card: Card,
+): Promise<string> {
+  if (!['eco', 'firm', 'house'].includes(role)) {
+    return card.content.split('\n').slice(0, 2).join(' ').trim().slice(0, 200);
+  }
+
+  const roleDesc =
+    role === 'eco' ? '거시경제 전문가' :
+    role === 'firm' ? '기업분석 전문가' :
+    '가계재무 전문가';
+
+  const msgs: ChatMsg[] = [
+    {
+      role: 'system',
+      content: `당신은 ${roleDesc}입니다. 자신의 분석 결과를 2-3줄로 간결하게 요약하세요.`,
+    },
+    {
+      role: 'user',
+      content: `다음 분석 결과를 2-3줄로 핵심만 요약해주세요:\n\n${card.content.slice(0, 1500)}`,
+    },
+  ];
+
+  try {
+    const { content } = await localGenerate(role, msgs, {
+      max_tokens: 150,
+      temperature: 0.2,
+      loraName: resolveLoraName(role),
+    });
+    return sanitizeGenerated(content) || content;
+  } catch (err) {
+    console.error('[genSummary][ERROR]', err);
+    // Fallback: extract first few bullet points or sentences
+    const lines = card.content.split('\n').filter(l => l.trim());
+    const keyLines = lines.filter(l => /^[①②③④⑤⑥⑦⑧⑨⑩•\-]/.test(l.trim())).slice(0, 3);
+    if (keyLines.length) {
+      return keyLines.join(' ').slice(0, 300);
+    }
+    return lines.slice(0, 3).join(' ').slice(0, 300);
+  }
+}
+
+/**
+ * Generate a combined final answer from all expert summaries
+ * This provides a holistic view synthesizing all expert perspectives
+ */
+export async function genCombinedAnswer(params: {
+  query: string;
+  summaries: Array<{ role: Role; summary: string }>;
+}): Promise<Card> {
+  const { query, summaries } = params;
+
+  if (summaries.length === 0) {
+    return {
+      type: 'combined',
+      title: '종합 분석',
+      content: '분석 결과가 없습니다.',
+      conf: 0.5,
+    };
+  }
+
+  if (summaries.length === 1) {
+    // Single expert - just return a formatted version
+    return {
+      type: 'combined',
+      title: '종합 분석',
+      content: summaries[0].summary,
+      conf: 0.8,
+    };
+  }
+
+  // Multiple experts - synthesize their perspectives
+  const summariesText = summaries
+    .map(({ role, summary }) => {
+      const roleLabel =
+        role === 'eco' ? '거시경제 관점' :
+        role === 'firm' ? '기업분석 관점' :
+        '가계재무 관점';
+      return `[${roleLabel}]\n${summary}`;
+    })
+    .join('\n\n');
+
+  const msgs: ChatMsg[] = [
+    {
+      role: 'system',
+      content: `당신은 여러 경제 전문가들의 분석을 종합하는 전문가입니다. 각 전문가의 핵심 인사이트를 통합하여 균형잡힌 최종 답변을 제공하세요.`,
+    },
+    {
+      role: 'user',
+      content: `질문: ${query}\n\n각 전문가의 분석 요약:\n${summariesText}\n\n위 전문가들의 분석을 종합하여 질문에 대한 통합된 답변을 3-5문단으로 작성해주세요. 각 전문가의 관점을 모두 반영하되, 자연스럽게 연결하여 하나의 일관된 답변으로 만들어주세요.`,
+    },
+  ];
+
+  try {
+    // Use the first expert's role for generation (or eco as default)
+    const primaryRole = summaries[0].role;
+    const { content } = await localGenerate(primaryRole, msgs, {
+      max_tokens: 800,
+      temperature: 0.3,
+      loraName: resolveLoraName(primaryRole),
+    });
+
+    return {
+      type: 'combined',
+      title: '종합 분석',
+      content: sanitizeGenerated(content) || content,
+      conf: 0.85,
+    };
+  } catch (err) {
+    console.error('[genCombinedAnswer][ERROR]', err);
+    // Fallback: just concatenate summaries
+    return {
+      type: 'combined',
+      title: '종합 분석',
+      content: summariesText,
+      conf: 0.6,
+    };
+  }
 }
 
 export async function classifyQueryWithRouter(

@@ -1,0 +1,121 @@
+====================================================================================================
+SEQUENTIAL SUMMARY FEATURE TEST & BENCHMARK
+====================================================================================================
+Test started: 2025-10-21 09:01:55
+
+
+====================================================================================================
+[Test 1] GDP가 뭐야?
+Category: ECO only
+Expected roles: ['eco']
+====================================================================================================
+
+  Testing SEQUENTIAL mode...
+  Response time: 22.92s
+  Actual roles: ['eco']
+  Cards: 2
+
+    Card 1 (combined): [카드 1]
+      Content length: 285 chars
+      ⚠️  No embedded summary marker
+
+    Card 2 (eco): 거시 핵심
+      Content length: 188 chars
+      ✅ Embedded summary: 2 lines
+         Preview: [핵심 포인트 1줄] GDP는 국가의 경제 성장과 발전을 나타내는 지표입니다.
+[추가 컨텍스트 1줄] 지표의 정의와 기준은 통계 기관에 공개되어...
+
+  Testing PARALLEL mode (for comparison)...
+  Response time: 20.70s
+
+  Performance comparison:
+    Sequential: 22.92s
+    Parallel:   20.70s
+    Difference: +2.22s (+10.7%)
+
+====================================================================================================
+[Test 2] 삼성전자 3분기 실적이 코스피에 미치는 영향은?
+Category: ECO+FIRM sequential
+Expected roles: ['eco', 'firm']
+====================================================================================================
+
+  Testing SEQUENTIAL mode...
+  Response time: 60.54s
+  Actual roles: ['eco', 'firm']
+  Cards: 3
+
+    Card 1 (eco): 거시 핵심
+      Content length: 286 chars
+      ✅ Embedded summary: 2 lines
+         Preview: [핵심 포인트 1줄] 삼성전자 3분기 실적은 코스피에 영향을 미치며 주가 상승을 유도했음.
+[추가 컨텍스트 1줄] 삼성전자는 2023년 3분기 ...
+
+    Card 2 (firm): 기업 스냅샷
+      Content length: 217 chars
+      ⚠️  No embedded summary marker
+
+    Card 3 (combined): 종합 분석
+      Content length: 210 chars
+      ⚠️  No embedded summary marker
+
+  Testing PARALLEL mode (for comparison)...
+  Response time: 35.07s
+
+  Performance comparison:
+    Sequential: 60.54s
+    Parallel:   35.07s
+    Difference: +25.47s (+72.6%)
+
+====================================================================================================
+[Test 3] 반도체 산업 전망과 투자 방법
+Category: 3-expert sequential
+Expected roles: ['eco', 'firm', 'house']
+====================================================================================================
+
+  Testing SEQUENTIAL mode...
+  Response time: 71.73s
+  Actual roles: ['eco', 'firm', 'house']
+  Cards: 4
+
+    Card 1 (eco): 거시 핵심
+      Content length: 349 chars
+      ⚠️  No embedded summary marker
+
+    Card 2 (firm): 기업 스냅샷
+      Content length: 157 chars
+      ✅ Embedded summary: 2 lines
+         Preview: [핵심 포인트 1줄]
+[추가 컨텍스트 1줄]...
+
+    Card 3 (house): 가계 프레임
+      Content length: 138 chars
+      ⚠️  No embedded summary marker
+
+    Card 4 (combined): 종합 분석
+      Content length: 283 chars
+      ⚠️  No embedded summary marker
+
+  Testing PARALLEL mode (for comparison)...
+  Response time: 49.10s
+
+  Performance comparison:
+    Sequential: 71.73s
+    Parallel:   49.10s
+    Difference: +22.63s (+46.1%)
+
+====================================================================================================
+SUMMARY
+====================================================================================================
+
+Total tests: 3
+Total cards generated: 9
+Cards with embedded summaries: 3
+Summary coverage: 3/9 (33.3%)
+
+Performance:
+  Avg Sequential time: 51.73s
+  Avg Parallel time:   34.96s
+  Sequential overhead: +16.77s (+48.0%)
+
+✅ Results saved to: sequential_summary_test_results.json
+Test completed: 2025-10-21 09:06:21

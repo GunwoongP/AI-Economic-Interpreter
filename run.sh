@@ -8,6 +8,11 @@
 
 set -euo pipefail
 
+log() {
+  local level="$1"; shift
+  printf '[run.sh] [%s] %s\n' "$level" "$*" >&2
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/logs}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
