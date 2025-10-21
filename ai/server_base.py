@@ -54,6 +54,22 @@ def register_rbln_loras(lora_map: dict[str, str]):
     _RBLN_LORA_MODULES = {k: str(Path(v).resolve()) for k, v in lora_map.items()}
     print(f"[AI] Registered {len(_RBLN_LORA_MODULES)} LoRA modules for RBLN: {list(_RBLN_LORA_MODULES.keys())}")
 
+_OFFLINE_FLAGS = {"1", "true", "yes", "on", "True"}
+
+def _hf_load_kwargs() -> dict:
+    kwargs: dict[str, Any] = {"trust_remote_code": True}
+    local_only = False
+    if os.environ.get("MODEL_LOCAL_ONLY", "").strip() in _OFFLINE_FLAGS:
+        local_only = True
+    if os.environ.get("HF_HUB_OFFLINE", "").strip() in _OFFLINE_FLAGS:
+        local_only = True
+    if os.environ.get("TRANSFORMERS_OFFLINE", "").strip() in _OFFLINE_FLAGS:
+        local_only = True
+    if local_only:
+        kwargs["local_files_only"] = True
+    return kwargs
+
+
 def build_app(
     role_name: str,
     model_id: str,
@@ -63,15 +79,43 @@ def build_app(
     backend: str,
     enable_trace: bool = False,
 ) -> FastAPI:
+    hf_kwargs = _hf_load_kwargs()
     if backend == "rbln":
         tokenizer, model, device = _load_rbln_model(model_id)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_id, **hf_kwargs)
+        except Exception as err:
+            raise RuntimeError(f"Failed to load tokenizer for {model_id}: {err}") from err
         if torch.cuda.is_available():
-            model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16, device_map="auto")
-            device = next(model.parameters()).device
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    **hf_kwargs,
+                )
+            except Exception as err:
+                raise RuntimeError(f"Failed to load model for {model_id}: {err}") from err
+            first_param = next(model.parameters())
+            device = first_param.device
+            print(f"[AI] Initial device for {model_id}: {device}")
+            if device.type == "cpu":
+                try:
+                    model = model.to("cuda")
+                    first_param = next(model.parameters())
+                    device = first_param.device
+                    print(f"[AI] Forced move to CUDA for {model_id}: {device}")
+                except RuntimeError as err:
+                    print(f"[AI-WARN] Could not move {model_id} to CUDA automatically: {err}")
+                    device = torch.device("cpu")
+            device_extra = f"{device.type}{f':{device.index}' if getattr(device, 'index', None) is not None else ''}"
+            print(f"[AI] Loaded {model_id} on {device_extra} (dtype={first_param.dtype})")
+            device_map = getattr(model, "hf_device_map", None)
+            if device_map:
+                print(f"[AI] Device map for {model_id}: {device_map}")
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **hf_kwargs)
             device = torch.device("cpu")
 
     class ChatIn(BaseModel):
