@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_BASE =
-  process.env.BACKEND_API_BASE ??
-  process.env.NEXT_PUBLIC_API_BASE ??
-  'http://127.0.0.1:3001';
+const DEFAULT_BACKEND =
+  process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3001';
 
 function resolveBackend(path: string) {
-  return `${BACKEND_BASE.replace(/\/+$/, '')}${path}`;
+  const base = DEFAULT_BACKEND.replace(/\/+$/, '');
+  return `${base}${path}`;
 }
 
 function clientClosedResponse() {

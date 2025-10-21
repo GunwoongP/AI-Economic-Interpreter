@@ -1,9 +1,18 @@
 // src/lib/api.ts
 import type { AskInput, AskOutput, DailyInsight, Mode, Role, SeriesResp } from './types';
 
-const BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, ''); // ← 끝 슬래시 제거
+const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, ''); // ← 끝 슬래시 제거
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' as const };
+
+function resolveBase(): string {
+  // Always use /api/* routes in the browser (client-side)
+  if (typeof window !== 'undefined') {
+    return '';
+  }
+  // Server-side: use the backend URL directly
+  return RAW_API_BASE || '';
+}
 
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -18,7 +27,8 @@ async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function apiUrl(path: string) {
-  return BASE ? `${BASE}${path}` : `/api${path}`;
+  const base = resolveBase();
+  return base ? `${base}${path}` : `/api${path}`;
 }
 
 export function postAsk(body: AskInput): Promise<AskOutput> {

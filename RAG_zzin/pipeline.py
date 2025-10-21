@@ -42,8 +42,6 @@ class RAGPipeline:
         self._wise_by_code: Dict[str, List[int]] = defaultdict(list)
         self._wise_by_name: Dict[str, List[int]] = defaultdict(list)
         self._naver_by_name: Dict[str, List[int]] = defaultdict(list)
-        self._bok_by_term: Dict[str, List[int]] = defaultdict(list)
-        self._events_by_name: Dict[str, List[int]] = defaultdict(list)
         self._build_meta_indexes()
 
     def add_texts(
@@ -124,8 +122,6 @@ class RAGPipeline:
         self._wise_by_code.clear()
         self._wise_by_name.clear()
         self._naver_by_name.clear()
-        self._bok_by_term.clear()
-        self._events_by_name.clear()
         for idx, meta in enumerate(self.store.metas):
             dataset = meta.get("dataset")
             if dataset == "wise_reports":
@@ -143,16 +139,6 @@ class RAGPipeline:
                     norm = self._normalize_key(name)
                     if norm:
                         self._naver_by_name[norm].append(idx)
-            elif dataset == "bok_terms":
-                term = meta.get("term")
-                if term:
-                    for key in self._term_keys(term):
-                        self._bok_by_term[key].append(idx)
-            elif dataset == "events_catalog":
-                name = meta.get("name")
-                if name:
-                    for key in self._term_keys(name):
-                        self._events_by_name[key].append(idx)
 
     def _augment_contexts(
         self, query: str, contexts: List[Dict[str, Any]], top_k: int
@@ -173,14 +159,6 @@ class RAGPipeline:
 
         for norm_name, idxs in self._naver_by_name.items():
             if norm_name and norm_name in norm_query:
-                candidate_indices.extend(idxs)
-
-        for term_key, idxs in self._bok_by_term.items():
-            if term_key and term_key in norm_query:
-                candidate_indices.extend(idxs)
-
-        for event_key, idxs in self._events_by_name.items():
-            if event_key and event_key in norm_query:
                 candidate_indices.extend(idxs)
 
         existing_indices = {
@@ -223,14 +201,6 @@ class RAGPipeline:
                 name = meta.get("name") or ""
                 if name and self._normalize_key(name) in norm_query:
                     score += 2.5
-            elif dataset == "bok_terms":
-                term = meta.get("term") or ""
-                if term and self._term_matches_query(term, norm_query):
-                    score += 2.5
-            elif dataset == "events_catalog":
-                name = meta.get("name") or ""
-                if name and self._term_matches_query(name, norm_query):
-                    score += 2.0
             meta["score"] = score
 
     def _deduplicate_contexts(self, contexts: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
@@ -258,22 +228,3 @@ class RAGPipeline:
             if len(deduped) >= top_k:
                 break
         return deduped
-
-    def _term_keys(self, value: str) -> List[str]:
-        tokens: set[str] = set()
-        norm = self._normalize_key(value)
-        if norm:
-            tokens.add(norm)
-        for piece in re.split(r"[\s()\[\]{}<>\-_/·,:;]+", value):
-            norm_piece = self._normalize_key(piece)
-            if norm_piece and len(norm_piece) >= 2:
-                tokens.add(norm_piece)
-        return list(tokens)
-
-    def _term_matches_query(self, value: str, norm_query: str) -> bool:
-        if not value:
-            return False
-        for token in self._term_keys(value):
-            if token and token in norm_query:
-                return True
-        return False

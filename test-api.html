@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API Response Test</h1>
+    <button onclick="testAPIs()">Test All APIs</button>
+    <div id="results" style="margin-top: 20px; font-family: monospace; white-space: pre-wrap;"></div>
+
+    <script>
+    async function testAPIs() {
+        const results = document.getElementById('results');
+        results.innerHTML = 'Testing...\n\n';
+
+        try {
+            // Test KOSPI
+            results.innerHTML += '1. Testing /api/timeseries?symbol=KOSPI\n';
+            const kospiRes = await fetch('http://localhost:3000/api/timeseries?symbol=KOSPI');
+            const kospiData = await kospiRes.json();
+            results.innerHTML += `   Status: ${kospiRes.status}\n`;
+            results.innerHTML += `   Symbol: ${kospiData.symbol}, Values: ${kospiData.values?.length || 0}\n\n`;
+
+            // Test IXIC
+            results.innerHTML += '2. Testing /api/timeseries?symbol=IXIC\n';
+            const ixicRes = await fetch('http://localhost:3000/api/timeseries?symbol=IXIC');
+            const ixicData = await ixicRes.json();
+            results.innerHTML += `   Status: ${ixicRes.status}\n`;
+            results.innerHTML += `   Symbol: ${ixicData.symbol}, Values: ${ixicData.values?.length || 0}\n\n`;
+
+            // Test Daily Insight
+            results.innerHTML += '3. Testing /api/insight/daily?limit=6\n';
+            const insightRes = await fetch('http://localhost:3000/api/insight/daily?limit=6');
+            const insightData = await insightRes.json();
+            results.innerHTML += `   Status: ${insightRes.status}\n`;
+            results.innerHTML += `   Domestic news: ${insightData.news?.domestic?.length || 0}\n`;
+            results.innerHTML += `   Global news: ${insightData.news?.global?.length || 0}\n`;
+            results.innerHTML += `   KOSPI series: ${insightData.series?.kospi?.values?.length || 0} values\n`;
+            results.innerHTML += `   IXIC series: ${insightData.series?.ixic?.values?.length || 0} values\n\n`;
+
+            results.innerHTML += '✅ All tests completed!\n';
+            results.innerHTML += '\nFull insight data:\n' + JSON.stringify(insightData, null, 2);
+        } catch (error) {
+            results.innerHTML += `❌ Error: ${error.message}\n`;
+        }
+    }
+    </script>
+</body>
+</html>
