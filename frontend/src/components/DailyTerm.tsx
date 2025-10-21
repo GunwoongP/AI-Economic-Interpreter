@@ -129,9 +129,15 @@ export default function DailyTerm() {
     };
   }, [index, effectiveTotal, terms]);
 
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const isCurrentLoading = isLoading && !current;
-  const disablePrev = effectiveTotal != null ? effectiveTotal <= 1 : index <= 0;
-  const disableNext = effectiveTotal != null ? effectiveTotal <= 1 : false;
+  const disablePrev = mounted ? (effectiveTotal != null ? effectiveTotal <= 1 : index <= 0) : true;
+  const disableNext = mounted ? (effectiveTotal != null ? effectiveTotal <= 1 : false) : true;
 
   const handlePrev = () => {
     setIndex((prev) => {

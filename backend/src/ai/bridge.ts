@@ -1,6 +1,6 @@
-import type { Card, Role, SeriesResp } from '../types.js';
+import type { Card, Role } from '../types.js';
 import { localGenerate, ChatMsg, ProviderMetrics } from './provider_local.js';
-import { draftPrompt, editorPrompt, routerPrompt, dailyInsightPrompt, marketSummaryPrompt, type PromptEvidence } from './prompts.js';
+import { draftPrompt, editorPrompt, routerPrompt, type PromptEvidence } from './prompts.js';
 
 export type AskRole = 'eco' | 'firm' | 'house';
 
@@ -60,64 +60,7 @@ export type Evidence = {
   label?: string;
   source?: string;
   date?: string;
-  isHistoricalEvent?: boolean;  // For ECO: marks historical event catalog entries
 };
-export interface InsightSnippet {
-  title: string;
-  lines: string[];
-}
-
-export interface InsightBundle {
-  label: string;
-  kospi?: InsightSnippet | null;
-  ixic?: InsightSnippet | null;
-}
-
-interface SeriesSummaryInfo {
-  trend: string;
-  summary: string;
-  change: number;
-  pct: number;
-  direction: '상승' | '하락' | '보합';
-  latest: number;
-  previous: number;
-  spanChange: number;
-  spanPct: number;
-  spanStart: string;
-}
-
-function describeSeries(series: SeriesResp): SeriesSummaryInfo {
-  const first = series.values[0];
-  const last = series.values.at(-1)!;
-  const prev = series.values.length > 1 ? series.values.at(-2)! : last;
-  const change = last.close - prev.close;
-  const pct = prev.close ? (change / prev.close) * 100 : 0;
-  const spanChange = last.close - first.close;
-  const spanPct = first.close ? (spanChange / first.close) * 100 : 0;
-  const direction: SeriesSummaryInfo['direction'] =
-    change > 0 ? '상승' : change < 0 ? '하락' : '보합';
-  const marketLabel = series.symbol === 'KOSPI' ? '코스피' : '나스닥';
-  const trend = `${marketLabel} ${direction} (${change >= 0 ? '+' : ''}${change.toFixed(
-    2,
-  )}, ${pct.toFixed(2)}%)`;
-  const dailyRefDate = new Date(prev.t).toLocaleDateString();
-  const summary = `${series.stamp} ${marketLabel} 종가 ${last.close.toFixed(
-    2,
-  )}p, 전일(${dailyRefDate}) 대비 ${change >= 0 ? '+' : ''}${change.toFixed(2)}p (${pct.toFixed(2)}%)`;
-  return {
-    trend,
-    summary,
-    change,
-    pct,
-    direction,
-    latest: last.close,
-    previous: prev.close,
-    spanChange,
-    spanPct,
-    spanStart: new Date(first.t).toLocaleDateString(),
-  };
-}
-
 function sanitizeGenerated(raw: string): string {
   if (!raw) return '';
   let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
@@ -128,6 +71,8 @@ function sanitizeGenerated(raw: string): string {
     .replace(/반증\/리스크[^)\n]*\)?/gi, '')
     .replace(/투자권유 금지[^)\n]*\)?/gi, '');
   text = text.replace(/^(?:[\*\-]\s*)?(?:Thought|Analysis|Reasoning|Plan)\s*:.*$/gim, '');
+  text = text.replace(/RAG#/gi, '근거');
+  text = text.replace(/근거\s*#?(\d+)/gi, '[$1]');
   const seen = new Set<string>();
   text = text
     .split('\n')
@@ -178,7 +123,7 @@ export async function genDraft(
       ? meta.date.trim()
       : undefined;
     return {
-      label: e.label ?? `RAG#${idx + 1}`,
+      label: e.label ?? `근거${idx + 1}`,
       text: e.text,
       source: sourceCandidate,
       date: dateCandidate,
@@ -192,6 +137,56 @@ export async function genDraft(
     loraName: resolveLoraName(role),
   });
   const cleaned = sanitizeGenerated(content) || content;
+  const referenceEntries = promptEvidences.map((item, idx) => {
+    const num = idx + 1;
+    const dateLabel = (item.date ?? '').trim() || '날짜 미상';
+    const sourceLabel = (item.source ?? '').trim() || '출처 미상';
+    const normalizedText = item.text.replace(/\s+/g, ' ').trim();
+    const summary = normalizedText
+      ? (normalizedText.length > 80 ? `${normalizedText.slice(0, 77)}…` : normalizedText)
+      : '핵심 요약 없음';
+    return {
+      num,
+      line: `${num}. ${dateLabel} | ${sourceLabel} | ${summary}`,
+      date: item.date,
+    };
+  });
+
+  let contentWithRefs = cleaned.trim();
+  if (referenceEntries.length) {
+    const citationRegex = /\[\d+\]/;
+    const bulletRegex = /^(?:[-*•·]|[\d]+[.)])\s*/;
+    const lines = contentWithRefs.split('
+');
+    let assigned = 0;
+    const decorated = lines.map((line) => {
+      if (assigned < referenceEntries.length) {
+        const trimmedLine = line.trim();
+        if (
+          trimmedLine &&
+          (bulletRegex.test(trimmedLine) || (assigned === 0 && trimmedLine.length > 0)) &&
+          !citationRegex.test(line)
+        ) {
+          assigned += 1;
+          return `${line} [${assigned}]`.trim();
+        }
+      }
+      return line;
+    });
+    contentWithRefs = decorated.join('
+').trim();
+    if (!citationRegex.test(contentWithRefs)) {
+      contentWithRefs = `${contentWithRefs} [1]`.trim();
+    }
+    const refLines = referenceEntries.map((entry) => entry.line);
+    contentWithRefs = contentWithRefs.replace(/
++근거[\s\S]*$/i, '').trim();
+    contentWithRefs = `${contentWithRefs}
+
+근거
+${refLines.join('
+')}`;
+  }
 
   return {
     type: role,
@@ -201,139 +196,14 @@ export async function genDraft(
         : role === 'firm'
         ? '기업 스냅샷'
         : '가계 프레임',
-    content: cleaned,
+    content: contentWithRefs,
     conf: 0.7,
-    sources: promptEvidences.map((item, idx) => ({
-      title: item.source ? `${item.label} ${item.source}` : item.label,
-      date: item.date,
+    sources: referenceEntries.map((entry, idx) => ({
+      title: entry.line,
+      date: promptEvidences[idx]?.date,
       score: evidences[idx]?.sim,
     })),
   };
-}
-
-/**
- * Generate a compact 2-3 line summary of an expert's answer
- * This summary is passed to the next expert in the sequential chain
- */
-export async function genSummary(
-  role: Role,
-  card: Card,
-): Promise<string> {
-  if (!['eco', 'firm', 'house'].includes(role)) {
-    return card.content.split('\n').slice(0, 2).join(' ').trim().slice(0, 200);
-  }
-
-  const roleDesc =
-    role === 'eco' ? '거시경제 전문가' :
-    role === 'firm' ? '기업분석 전문가' :
-    '가계재무 전문가';
-
-  const msgs: ChatMsg[] = [
-    {
-      role: 'system',
-      content: `당신은 ${roleDesc}입니다. 자신의 분석 결과를 2-3줄로 간결하게 요약하세요.`,
-    },
-    {
-      role: 'user',
-      content: `다음 분석 결과를 2-3줄로 핵심만 요약해주세요:\n\n${card.content.slice(0, 1500)}`,
-    },
-  ];
-
-  try {
-    const { content } = await localGenerate(role, msgs, {
-      max_tokens: 150,
-      temperature: 0.2,
-      loraName: resolveLoraName(role),
-    });
-    return sanitizeGenerated(content) || content;
-  } catch (err) {
-    console.error('[genSummary][ERROR]', err);
-    // Fallback: extract first few bullet points or sentences
-    const lines = card.content.split('\n').filter(l => l.trim());
-    const keyLines = lines.filter(l => /^[①②③④⑤⑥⑦⑧⑨⑩•\-]/.test(l.trim())).slice(0, 3);
-    if (keyLines.length) {
-      return keyLines.join(' ').slice(0, 300);
-    }
-    return lines.slice(0, 3).join(' ').slice(0, 300);
-  }
-}
-
-/**
- * Generate a combined final answer from all expert summaries
- * This provides a holistic view synthesizing all expert perspectives
- */
-export async function genCombinedAnswer(params: {
-  query: string;
-  summaries: Array<{ role: Role; summary: string }>;
-}): Promise<Card> {
-  const { query, summaries } = params;
-
-  if (summaries.length === 0) {
-    return {
-      type: 'combined',
-      title: '종합 분석',
-      content: '분석 결과가 없습니다.',
-      conf: 0.5,
-    };
-  }
-
-  if (summaries.length === 1) {
-    // Single expert - just return a formatted version
-    return {
-      type: 'combined',
-      title: '종합 분석',
-      content: summaries[0].summary,
-      conf: 0.8,
-    };
-  }
-
-  // Multiple experts - synthesize their perspectives
-  const summariesText = summaries
-    .map(({ role, summary }) => {
-      const roleLabel =
-        role === 'eco' ? '거시경제 관점' :
-        role === 'firm' ? '기업분석 관점' :
-        '가계재무 관점';
-      return `[${roleLabel}]\n${summary}`;
-    })
-    .join('\n\n');
-
-  const msgs: ChatMsg[] = [
-    {
-      role: 'system',
-      content: `당신은 여러 경제 전문가들의 분석을 종합하는 전문가입니다. 각 전문가의 핵심 인사이트를 통합하여 균형잡힌 최종 답변을 제공하세요.`,
-    },
-    {
-      role: 'user',
-      content: `질문: ${query}\n\n각 전문가의 분석 요약:\n${summariesText}\n\n위 전문가들의 분석을 종합하여 질문에 대한 통합된 답변을 3-5문단으로 작성해주세요. 각 전문가의 관점을 모두 반영하되, 자연스럽게 연결하여 하나의 일관된 답변으로 만들어주세요.`,
-    },
-  ];
-
-  try {
-    // Use the first expert's role for generation (or eco as default)
-    const primaryRole = summaries[0].role;
-    const { content } = await localGenerate(primaryRole, msgs, {
-      max_tokens: 800,
-      temperature: 0.3,
-      loraName: resolveLoraName(primaryRole),
-    });
-
-    return {
-      type: 'combined',
-      title: '종합 분석',
-      content: sanitizeGenerated(content) || content,
-      conf: 0.85,
-    };
-  } catch (err) {
-    console.error('[genCombinedAnswer][ERROR]', err);
-    // Fallback: just concatenate summaries
-    return {
-      type: 'combined',
-      title: '종합 분석',
-      content: summariesText,
-      conf: 0.6,
-    };
-  }
 }
 
 export async function classifyQueryWithRouter(
@@ -526,40 +396,6 @@ function stripChainOfThought(raw: string): string {
   return text.trim();
 }
 
-function extractJsonObject(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const withoutFence = trimmed
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```\s*$/g, '')
-    .trim();
-  const firstBrace = withoutFence.indexOf('{');
-  const lastBrace = withoutFence.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
-    return null;
-  }
-  return withoutFence.slice(firstBrace, lastBrace + 1);
-}
-
-function normalizeLines(value: unknown): string[] {
-  let candidates: string[] = [];
-  if (Array.isArray(value)) {
-    candidates = value.flatMap((item) =>
-      String(item ?? '')
-        .split(/\r?\n+/)
-        .map((line) => line.trim()),
-    );
-  } else if (typeof value === 'string') {
-    candidates = value.split(/\r?\n+/).map((line) => line.trim());
-  }
-  candidates = candidates
-    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-  return candidates.slice(0, 3);
-}
-
 function normalizeInsightEntry(entry: any): InsightSnippet | null {
   if (!entry || typeof entry !== 'object') return null;
   const rawTitle = typeof entry.title === 'string' ? entry.title.trim() : '';
@@ -571,224 +407,4 @@ function normalizeInsightEntry(entry: any): InsightSnippet | null {
   return { title, lines };
 }
 
-function parseDailyInsightPayload(raw: string): InsightBundle | null {
-  const jsonText = extractJsonObject(stripChainOfThought(raw));
-  if (!jsonText) return null;
-  try {
-    const parsed = JSON.parse(jsonText);
-    const label =
-      typeof parsed.label === 'string' && parsed.label.trim()
-        ? parsed.label.trim().slice(0, 40)
-        : '오늘의 해설';
-    const kospi = normalizeInsightEntry(parsed.kospi);
-    const ixic = normalizeInsightEntry(parsed.ixic);
-    if (!kospi && !ixic) {
-      return { label, kospi: null, ixic: null };
-    }
-    return { label, kospi: kospi ?? null, ixic: ixic ?? null };
-  } catch {
-    return null;
-  }
-}
 
-export async function genDailyInsight(params: {
-  focus: string;
-  kospi: SeriesResp;
-  ixic: SeriesResp;
-  news: { title: string; description: string; link?: string; pubDate?: string }[];
-}): Promise<{ summary: string; insights: InsightBundle | null; raw: string }> {
-  const kospiInfo = describeSeries(params.kospi);
-  const ixicInfo = describeSeries(params.ixic);
-  const structuredMsgs = dailyInsightPrompt({
-    focus: params.focus,
-    kospi: kospiInfo,
-    ixic: ixicInfo,
-    news: params.news,
-  }) as ChatMsg[];
-  const structured = await localGenerate('editor', structuredMsgs, { max_tokens: 420, temperature: 0.2 });
-  const raw = stripChainOfThought(structured.raw?.content ?? structured.content ?? '');
-  const parsedInsights = parseDailyInsightPayload(raw);
-  const fallback = buildFallbackInsights('오늘의 해설', kospiInfo, ixicInfo, params.news);
-  const insights = mergeInsights(parsedInsights, fallback);
-
-  const headlines = params.news
-    .map((item) => `${(item.title || '').trim()} :: ${(item.description || '').trim()}`.trim())
-    .filter((line) => line.replace(/::/g, '').trim().length > 0);
-  const marketMsgs = marketSummaryPrompt({
-    focus: params.focus,
-    kospi: {
-      trend: kospiInfo.trend,
-      summary: kospiInfo.summary,
-      changeText: formatChangeText(kospiInfo),
-    },
-    ixic: {
-      trend: ixicInfo.trend,
-      summary: ixicInfo.summary,
-      changeText: formatChangeText(ixicInfo),
-    },
-    headlines,
-  }) as ChatMsg[];
-  const narrative = await localGenerate('market', marketMsgs, { max_tokens: 420, temperature: 0.25 });
-  const summaryRaw = stripChainOfThought(narrative.raw?.content ?? narrative.content ?? '');
-  const summary = sanitizeGenerated(summaryRaw) || summaryRaw;
-
-  return {
-    raw,
-    summary,
-    insights,
-  };
-}
-
-function clampLine(text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= 80) {
-    return normalized;
-  }
-  const truncated = normalized.slice(0, 77);
-  const lastSpace = truncated.lastIndexOf(' ');
-  const safe = lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated;
-  return `${safe.trim()}…`;
-}
-
-function ensureMarketSnippet(
-  market: '코스피' | '나스닥',
-  primarySnippet: InsightSnippet | null | undefined,
-  fallbackSnippet: InsightSnippet | null | undefined,
-): InsightSnippet | null {
-  if (!primarySnippet && !fallbackSnippet) {
-    return null;
-  }
-
-  const directionSource = primarySnippet?.title ?? fallbackSnippet?.title ?? '';
-  const directionMatch = directionSource.match(/(상승|하락|보합)/);
-  const direction = directionMatch?.[1] ?? '보합';
-
-  const stripMarketPrefix = (value: string | undefined) =>
-    (value ?? '').replace(/^(코스피|나스닥)\s*(상승|하락|보합)?\s*[·:\-]?\s*/i, '').trim();
-
-  const primaryBody = stripMarketPrefix(primarySnippet?.title);
-  const fallbackBody = stripMarketPrefix(fallbackSnippet?.title);
-  const titleBody = primaryBody || fallbackBody || '핵심 요약';
-
-  const collected: string[] = [];
-  const pushLine = (line: string | undefined) => {
-    const next = clampLine(line ?? '');
-    if (!next) return;
-    if (collected.some((existing) => existing === next)) return;
-    collected.push(next);
-  };
-
-  (fallbackSnippet?.lines ?? []).forEach((line) => pushLine(line));
-  (primarySnippet?.lines ?? []).forEach((line) => pushLine(line));
-
-  return {
-    title: `${market} ${direction} · ${titleBody}`,
-    lines: collected.slice(0, 3),
-  };
-}
-
-function directionNarrative(direction: SeriesSummaryInfo['direction']): string {
-  if (direction === '상승') return '상승세';
-  if (direction === '하락') return '약세';
-  return '보합권';
-}
-
-function formatChangeLine(market: '코스피' | '나스닥', info: SeriesSummaryInfo): string {
-  const changeText = formatChangeText(info);
-  const mood = directionNarrative(info.direction);
-  return clampLine(
-    `오늘 ${market}은 ${mood}로 마감했고 종가는 ${info.latest.toFixed(2)}p(전일 대비 ${changeText})입니다.`,
-  );
-}
-
-function formatChangeText(info: SeriesSummaryInfo): string {
-  const change = info.change >= 0 ? `+${info.change.toFixed(2)}` : info.change.toFixed(2);
-  const pct = info.pct >= 0 ? `+${info.pct.toFixed(2)}` : info.pct.toFixed(2);
-  return `${change}p (${pct}%)`;
-}
-
-function formatNewsLine(
-  market: '코스피' | '나스닥',
-  newsItem: { title?: string; description?: string } | undefined,
-): string {
-  if (!newsItem) {
-    return '';
-  }
-  const title = newsItem.title?.replace(/<\/?[^>]+>/g, '').trim() || '';
-  const desc = newsItem.description?.replace(/<\/?[^>]+>/g, '').trim() || '';
-  const combined = `${title || desc}`.trim();
-  if (!combined) {
-    return '';
-  }
-  return clampLine(`오늘 ${market} 관련 이슈로는 ${combined} 등이 주목받았습니다. [뉴스]`);
-}
-
-function formatSummaryLine(info: SeriesSummaryInfo): string {
-  const spanChangeText = info.spanChange >= 0 ? `+${info.spanChange.toFixed(2)}p` : info.spanChange.toFixed(2);
-  const spanPctText = info.spanPct >= 0 ? `+${info.spanPct.toFixed(2)}%` : info.spanPct.toFixed(2);
-  return clampLine(`${info.spanStart} 이후 누적 흐름은 ${spanChangeText} (${spanPctText})입니다.`);
-}
-
-function buildFallbackInsights(
-  label: string,
-  kospiInfo: ReturnType<typeof describeSeries>,
-  ixicInfo: ReturnType<typeof describeSeries>,
-  news: { title: string; description: string }[],
-): InsightBundle {
-  const headlines = Array.isArray(news) ? news : [];
-  const [headline1, headline2] = headlines;
-
-  const makeLines = (
-    market: '코스피' | '나스닥',
-    info: ReturnType<typeof describeSeries>,
-    headline: { title: string; description: string } | undefined,
-  ): string[] => {
-    const lines: string[] = [];
-    lines.push(formatChangeLine(market, info));
-    const newsLine = formatNewsLine(market, headline);
-    if (newsLine) {
-      lines.push(newsLine);
-    }
-    const summaryLine = formatSummaryLine(info);
-    if (summaryLine) {
-      lines.push(summaryLine);
-    }
-    return lines.filter(Boolean).slice(0, 3);
-  };
-
-  const kospiLines = makeLines('코스피', kospiInfo, headline1);
-  const ixicLines = makeLines('나스닥', ixicInfo, headline2 ?? headline1);
-
-  return {
-    label,
-    kospi: kospiLines.length
-      ? {
-          title: clampLine(`코스피 ${kospiInfo.direction} · ${formatChangeText(kospiInfo)}`),
-          lines: kospiLines,
-        }
-      : null,
-    ixic: ixicLines.length
-      ? {
-          title: clampLine(`나스닥 ${ixicInfo.direction} · ${formatChangeText(ixicInfo)}`),
-          lines: ixicLines,
-        }
-      : null,
-  };
-}
-
-
-function mergeInsights(primary: InsightBundle | null, fallback: InsightBundle): InsightBundle {
-  if (!primary) {
-    return fallback;
-  }
-
-  const label = primary.label?.trim() || fallback.label;
-  const kospi = ensureMarketSnippet('코스피', primary.kospi, fallback.kospi);
-  const ixic = ensureMarketSnippet('나스닥', primary.ixic, fallback.ixic);
-
-  return {
-    label,
-    kospi: kospi ?? null,
-    ixic: ixic ?? null,
-  };
-}

@@ -24,7 +24,10 @@ export async function GET(req: NextRequest) {
 
     const upstreamBase = DEFAULT_BACKEND.replace(/\/+$/, '');
     const upstream = `${upstreamBase}/timeseries?symbol=${symbol}`;
+    console.log('[timeseries] DEFAULT_BACKEND:', DEFAULT_BACKEND);
+    console.log('[timeseries] upstream:', upstream);
     const res = await fetch(upstream, { cache: 'no-store' });
+    console.log('[timeseries] response status:', res.status);
 
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
